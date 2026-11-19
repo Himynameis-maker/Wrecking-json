@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>親方AI シミュレータ（PC / iPhone）</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 10px;
+      background: #12151c;
+      color: #eef1f6;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 10px;
+      overscroll-behavior: none;
+    }
+    .topbar {
+      width: 100%;
+      max-width: 540px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .btn-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      align-items: center;
+    }
+    button, select, a.link-btn {
+      background: #283042;
+      color: #eef1f6;
+      border: 1px solid #3c4863;
+      border-radius: 8px;
+      padding: 7px 10px;
+      font-size: 0.86rem;
+      text-decoration: none;
+      cursor: pointer;
+      touch-action: manipulation;
+    }
+    button.active { background: #2f6fed; border-color: #5b90ff; }
+    .screen-wrap {
+      width: 100%;
+      max-width: 512px;
+      background: #000;
+      border: 2px solid #2c3548;
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    canvas#gameCanvas {
+      display: block;
+      width: 100%;
+      height: auto;
+      aspect-ratio: 256 / 240;
+      image-rendering: pixelated;
+      image-rendering: crisp-edges;
+    }
+    .controls-area {
+      width: 100%;
+      max-width: 540px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 4px 6px;
+    }
+    .stick-base {
+      position: relative;
+      width: 132px;
+      height: 132px;
+      border-radius: 50%;
+      background: radial-gradient(circle, #252c3b 0%, #191e29 72%);
+      border: 2px solid #44516e;
+      touch-action: none;
+      user-select: none;
+      -webkit-user-select: none;
+      flex-shrink: 0;
+    }
+    .stick-cross-h, .stick-cross-v {
+      position: absolute;
+      background: rgba(255, 255, 255, 0.08);
+      pointer-events: none;
+    }
+    .stick-cross-h { left: 16px; right: 16px; top: 50%; height: 2px; margin-top: -1px; }
+    .stick-cross-v { top: 16px; bottom: 16px; left: 50%; width: 2px; margin-left: -1px; }
+    .stick-knob {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      width: 54px;
+      height: 54px;
+      margin-left: -27px;
+      margin-top: -27px;
+      border-radius: 50%;
+      background: radial-gradient(circle at 35% 35%, #6a8cff, #2f57c8);
+      border: 2px solid #9ab4ff;
+      box-shadow: 0 3px 10px rgba(0, 0, 0, 0.5);
+      pointer-events: none;
+    }
+    .hud {
+      flex: 1;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.78rem;
+      background: #181c26;
+      border: 1px solid #2d3548;
+      border-radius: 8px;
+      padding: 8px 10px;
+      line-height: 1.45;
+      white-space: pre;
+      overflow-x: auto;
+    }
+    .hint {
+      width: 100%;
+      max-width: 540px;
+      font-size: 0.78rem;
+      color: #9ba7be;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <div class="topbar">
+    <div class="btn-row">
+      <select id="stageSelect" aria-label="ステージ選択">
+        <option value="practice">練習ステージ（はしご複数＋壁8）</option>
+        <option value="u6">U6 初期構成（f0基準・はしご1本）</option>
+      </select>
+      <button id="resetBtn" type="button">リセット</button>
+      <button id="pauseBtn" type="button">一時停止</button>
+      <button id="stepBtn" type="button">+1F</button>
+    </div>
+    <a class="link-btn" href="./test.html">982行テスト</a>
+  </div>
+
+  <div class="screen-wrap">
+    <canvas id="gameCanvas" width="256" height="240"></canvas>
+  </div>
+
+  <div class="controls-area">
+    <div id="stickBase" class="stick-base" aria-label="擬似スティック">
+      <div class="stick-cross-h"></div>
+      <div class="stick-cross-v"></div>
+      <div id="stickKnob" class="stick-knob"></div>
+    </div>
+    <div id="hud" class="hud">読み込み中...</div>
+  </div>
+
+  <div class="hint">
+    操作: 画面の擬似スティック（iPhone/マウス） または キーボード（矢印キー / WASD）
+  </div>
+
+  <script src="./sim.js"></script>
+  <script src="./render.js"></script>
+  <script>
+    (function () {
+      const { RIGHT, LEFT, DOWN, UP, Sim } = window.WreckSim;
+      const { Renderer } = window.WreckRender;
+
+      const canvas = document.getElementById("gameCanvas");
+      const renderer = new Renderer(canvas);
+      const stageSelect = document.getElementById("stageSelect");
+      const resetBtn = document.getElementById("resetBtn");
+      const pauseBtn = document.getElementById("pauseBtn");
+      const stepBtn = document.getElementById("stepBtn");
+      const hudEl = document.getElementById("hud");
+      const stickBase = document.getElementById("stickBase");
+      const stickKnob = document.getElementById("stickKnob");
+
+      const STAGES = {
+        u6: {
+          ladders: { 0x515: 1 },
+          mario: { x: 80, y: 64, cr: 0x15 },
+          spike: { x: 80, y: 64, cr: 0x15 }
+        },
+        practice: {
+          ladders: {
+            0x515: 1, 0x519: 8,
+            0x522: 1, 0x526: 8, 0x52c: 1,
+            0x537: 1, 0x53b: 8,
+            0x543: 1, 0x546: 8, 0x54d: 1,
+            0x554: 8, 0x558: 1
+          },
+          mario: { x: 32, y: 192, cr: 0x52 },
+          spike: { x: 208, y: 64, cr: 0x1d }
+        }
+      };
+
+      let sim = null;
+      let paused = false;
+      let stickBits = 0;
+      let keyBits = 0;
+
+      function createStage() {
+        const cfg = STAGES[stageSelect.value] || STAGES.u6;
+        sim = new Sim({}, {});
+        sim.ladders = new Map(
+          Object.entries(cfg.ladders).map(([k, v]) => [Number(k), v])
+        );
+        sim.mario.x = cfg.mario.x;
+        sim.mario.y = cfg.mario.y;
+        sim.mario.cr = cfg.mario.cr;
+        sim.spike.x = cfg.spike.x;
+        sim.spike.y = cfg.spike.y;
+        sim.spike.cr = cfg.spike.cr;
+        renderNow();
+      }
+
+      function currentBits() {
+        let b = stickBits | keyBits;
+        if ((b & (LEFT | RIGHT)) === (LEFT | RIGHT)) {
+          b &= ~(LEFT | RIGHT);
+        }
+        if ((b & (UP | DOWN)) === (UP | DOWN)) {
+          b &= ~(UP | DOWN);
+        }
+        return b;
+      }
+
+      function stepOneFrame() {
+        sim.inputs[sim.f] = currentBits();
+        if (sim.f >= 4) delete sim.inputs[sim.f - 4];
+        sim.tick();
+      }
+
+      function dirLabel(b) {
+        const out = [];
+        if (b & UP) out.push("U");
+        if (b & DOWN) out.push("D");
+        if (b & LEFT) out.push("L");
+        if (b & RIGHT) out.push("R");
+        return out.length ? out.join("") : "-";
+      }
+
+      function hex2(v) {
+        return "$" + v.toString(16).toUpperCase().padStart(2, "0");
+      }
+
+      function renderNow() {
+        renderer.draw(sim);
+        const m = sim.mario;
+        const s = sim.spike;
+        const ai = sim.spikeAI;
+        const inp = currentBits();
+        hudEl.textContent =
+          "F:" + sim.f + "  IN:" + dirLabel(inp) + (paused ? " [PAUSE]" : "") + "\n" +
+          "Mario st:" + m.state + " X:" + m.x + " Y:" + m.y + " cr:" + hex2(m.cr) + " d:" + m.dir + "\n" +
+          "Spike st:" + s.state + " X:" + s.x + " Y:" + s.y + " cr:" + hex2(s.cr) + " d:" + s.dir + "\n" +
+          "AI    bits:" + dirLabel(s.bits) + "(" + s.bits + ") $39:" + ai.mem39 + " $3A:" + ai.timer;
+      }
+
+      // 擬似スティック（4方向優先・デッドゾーン付き）
+      let activePointerId = null;
+      const MAX_R = 40;
+      const DEAD_R = 13;
+
+      function updateStickFromPoint(clientX, clientY) {
+        const rect = stickBase.getBoundingClientRect();
+        const cx = rect.left + rect.width / 2;
+        const cy = rect.top + rect.height / 2;
+        let dx = clientX - cx;
+        let dy = clientY - cy;
+        const dist = Math.hypot(dx, dy);
+        if (dist > MAX_R) {
+          dx = (dx / dist) * MAX_R;
+          dy = (dy / dist) * MAX_R;
+        }
+        stickKnob.style.transform = "translate(" + dx.toFixed(1) + "px, " + dy.toFixed(1) + "px)";
+
+        if (dist < DEAD_R) {
+          stickBits = 0;
+        } else if (Math.abs(dx) >= Math.abs(dy)) {
+          stickBits = dx > 0 ? RIGHT : LEFT;
+        } else {
+          stickBits = dy > 0 ? DOWN : UP;
+        }
+      }
+
+      function resetStick() {
+        activePointerId = null;
+        stickBits = 0;
+        stickKnob.style.transform = "translate(0px, 0px)";
+      }
+
+      stickBase.addEventListener("pointerdown", function (e) {
+        e.preventDefault();
+        activePointerId = e.pointerId;
+        if (stickBase.setPointerCapture) {
+          try { stickBase.setPointerCapture(e.pointerId); } catch (_) {}
+        }
+        updateStickFromPoint(e.clientX, e.clientY);
+      });
+
+      stickBase.addEventListener("pointermove", function (e) {
+        if (e.pointerId !== activePointerId) return;
+        e.preventDefault();
+        updateStickFromPoint(e.clientX, e.clientY);
+      });
+
+      stickBase.addEventListener("pointerup", function (e) {
+        if (e.pointerId === activePointerId) resetStick();
+      });
+      stickBase.addEventListener("pointercancel", function (e) {
+        if (e.pointerId === activePointerId) resetStick();
+      });
+
+      // PC キーボード
+      const KEY_MAP = {
+        ArrowUp: UP, KeyW: UP,
+        ArrowDown: DOWN, KeyS: DOWN,
+        ArrowLeft: LEFT, KeyA: LEFT,
+        ArrowRight: RIGHT, KeyD: RIGHT
+      };
+      const pressedKeys = new Set();
+
+      function recomputeKeys() {
+        let b = 0;
+        for (const code of pressedKeys) {
+          b |= KEY_MAP[code] || 0;
+        }
+        keyBits = b;
+      }
+
+      window.addEventListener("keydown", function (e) {
+        if (KEY_MAP[e.code]) {
+          e.preventDefault();
+          pressedKeys.add(e.code);
+          recomputeKeys();
+        }
+      });
+
+      window.addEventListener("keyup", function (e) {
+        if (KEY_MAP[e.code]) {
+          pressedKeys.delete(e.code);
+          recomputeKeys();
+        }
+      });
+
+      window.addEventListener("blur", function () {
+        pressedKeys.clear();
+        recomputeKeys();
+        resetStick();
+      });
+
+      stageSelect.addEventListener("change", createStage);
+      resetBtn.addEventListener("click", createStage);
+
+      pauseBtn.addEventListener("click", function () {
+        paused = !paused;
+        pauseBtn.classList.toggle("active", paused);
+        pauseBtn.textContent = paused ? "再開" : "一時停止";
+        renderNow();
+      });
+
+      stepBtn.addEventListener("click", function () {
+        if (!paused) {
+          paused = true;
+          pauseBtn.classList.add("active");
+          pauseBtn.textContent = "再開";
+        }
+        stepOneFrame();
+        renderNow();
+      });
+
+      // 固定60fpsループ
+      const STEP_MS = 1000 / 60;
+      let lastTime = performance.now();
+      let acc = 0;
+
+      function loop(now) {
+        const dt = Math.min(100, now - lastTime);
+        lastTime = now;
+        if (!paused) {
+          acc += dt;
+          while (acc >= STEP_MS) {
+            stepOneFrame();
+            acc -= STEP_MS;
+          }
+          renderNow();
+        }
+        requestAnimationFrame(loop);
+      }
+
+      createStage();
+      requestAnimationFrame(loop);
+    })();
+  </script>
+</body>
+</html>
