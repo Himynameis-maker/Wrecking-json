@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>親方AI JS移植 ゴールデンテスト確認</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      margin: 16px;
+      background: #16181d;
+      color: #eef1f6;
+      line-height: 1.5;
+    }
+    h1 { font-size: 1.2rem; margin: 0 0 12px; }
+    .controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+      margin-bottom: 14px;
+    }
+    button, label.file-btn {
+      background: #2f6fed;
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      padding: 10px 14px;
+      font-size: 0.95rem;
+      cursor: pointer;
+    }
+    input[type="file"] { display: none; }
+    .summary {
+      padding: 12px 14px;
+      border-radius: 8px;
+      margin-bottom: 12px;
+      font-weight: bold;
+      background: #262b36;
+    }
+    .summary.ok { background: #174428; color: #9cf0b8; }
+    .summary.ng { background: #5a1c22; color: #ffb3ba; }
+    .meta { font-size: 0.88rem; color: #b7c0d0; margin-bottom: 12px; }
+    .list {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.85rem;
+      background: #0f1116;
+      border-radius: 8px;
+      padding: 10px 12px;
+      max-height: 65vh;
+      overflow: auto;
+      white-space: pre-wrap;
+    }
+    .ok-line { color: #8fe3a8; }
+    .ng-line { color: #ff8f99; }
+  </style>
+</head>
+<body>
+  <h1>親方AI JS移植 ゴールデンテスト（golden_tests.json）</h1>
+
+  <div class="controls">
+    <button id="reloadBtn" type="button">./golden_tests.json を再実行</button>
+    <label class="file-btn">
+      JSONファイルを選択（ローカル用）
+      <input id="fileInput" type="file" accept=".json,application/json">
+    </label>
+  </div>
+
+  <div id="summary" class="summary">読み込み中...</div>
+  <div id="meta" class="meta"></div>
+  <div id="log" class="list"></div>
+
+  <script src="./sim.js"></script>
+  <script>
+    (function () {
+      const summaryEl = document.getElementById("summary");
+      const metaEl = document.getElementById("meta");
+      const logEl = document.getElementById("log");
+      const reloadBtn = document.getElementById("reloadBtn");
+      const fileInput = document.getElementById("fileInput");
+
+      function renderResult(res, sourceLabel) {
+        const isOk = res.ng === 0;
+        summaryEl.className = "summary " + (isOk ? "ok" : "ng");
+        summaryEl.textContent =
+          (isOk ? "OK: " : "NG: ") +
+          "比較した行 " + res.totalRows +
+          "（legacy相当: " + res.totalLegacy + "）／ 食い違い " + res.ng;
+
+        const skippedEntries = Object.entries(res.skippedCols || {});
+        const skippedText = skippedEntries.length
+          ? "未実装スキップ列: " + skippedEntries.map(([k, v]) => k + "(" + v + "件)").join(", ")
+          : "スキップ列なし";
+        metaEl.textContent = "読込元: " + sourceLabel + " ／ " + skippedText;
+
+        const lines = [];
+        for (const c of res.caseResults) {
+          if (c.ok) {
+            lines.push('<div class="ok-line">OK  ' + escapeHtml(c.name) + "  [" + c.caseRows + "行]</div>");
+          } else {
+            lines.push('<div class="ng-line">NG  ' + escapeHtml(c.name) + "  [" + c.caseRows + "行]</div>");
+            for (const b of c.bad) {
+              lines.push(
+                '<div class="ng-line">      f' + b.tag + ": 期待 [" + b.exp.join(", ") + "] / モデル [" + b.got.join(", ") + "]</div>"
+              );
+            }
+          }
+        }
+        logEl.innerHTML = lines.join("");
+      }
+
+      function escapeHtml(s) {
+        return String(s)
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;");
+      }
+
+      async function runFromFetch() {
+        summaryEl.className = "summary";
+        summaryEl.textContent = "./golden_tests.json を読み込み中...";
+        metaEl.textContent = "";
+        logEl.textContent = "";
+        try {
+          const resp = await fetch("./golden_tests.json", { cache: "no-store" });
+          if (!resp.ok) throw new Error("HTTP " + resp.status);
+          const data = await resp.json();
+          const res = window.WreckSim.runGoldenTests(data);
+          renderResult(res, "./golden_tests.json (fetch)");
+        } catch (err) {
+          summaryEl.className = "summary";
+          summaryEl.textContent = "自動読込できませんでした（file:// で開いている場合など）。上の「JSONファイルを選択」から golden_tests.json を選んでください。";
+          metaEl.textContent = "詳細: " + err.message;
+        }
+      }
+
+      reloadBtn.addEventListener("click", runFromFetch);
+
+      fileInput.addEventListener("change", function (ev) {
+        const file = ev.target.files && ev.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = function () {
+          try {
+            const data = JSON.parse(reader.result);
+            const res = window.WreckSim.runGoldenTests(data);
+            renderResult(res, file.name + " (ファイル選択)");
+          } catch (err) {
+            summaryEl.className = "summary ng";
+            summaryEl.textContent = "JSONの解析またはテスト実行に失敗しました: " + err.message;
+          }
+        };
+        reader.readAsText(file, "utf-8");
+      });
+
+      runFromFetch();
+    })();
+  </script>
+</body>
+</html>
