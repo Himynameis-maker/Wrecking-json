@@ -8,8 +8,8 @@
 
   const DEFAULT_LADDERS = { 0x515: 1 };
   const SUPPORTED_ADDRS = new Set([
-    0x300, 0x308, 0x309, 0x30d, 0x30f, 0x312, 0x313, 0x315,
-    0x320, 0x328, 0x329, 0x32d, 0x32f, 0x332, 0x333, 0x335, 0x339, 0x33a
+    0x300, 0x308, 0x309, 0x30d, 0x30e, 0x30f, 0x312, 0x313, 0x315,
+    0x320, 0x328, 0x329, 0x32d, 0x32e, 0x32f, 0x332, 0x333, 0x335, 0x339, 0x33a
   ]);
 
   function relYOfProm(prom) {
@@ -32,6 +32,7 @@
       this.y = 64;          // $0315/$0335
       this.dir = 4;         // $0312/$0332
       this.top_y = 32;      // $0313/$0333
+      this.avail = 0;       // $030E/$032E
       this.cr = 0x15;       // $030F/$032F
       this.n = 0;           // 境界ステートの経過フレーム
       this.kind = null;     // 'enter' / 'arrive' / 'arrive_top' / 'enter_top' / 'cont' / 'enter_top_cont'
@@ -68,12 +69,20 @@
     }
 
     tryEnterLadder(slot, b, world) {
-      if ((b & (UP | DOWN)) === 0) return false;
-      if (((slot.x + 6) & 0xf) >= 12) return false;
+      const curTile = world.getTile(0x500 + slot.cr);
+      if (curTile >= 9 && curTile < 12) return false;
+
       const row = (slot.cr >> 4) & 0xf;
-      const canUp = world.getTile(0x500 + slot.cr) === 1;
+      const canUp = curTile === 1;
       const canDown = row < 7 && world.getTile(0x500 + slot.cr + 0x10) === 1;
-      const avail = (canUp ? 2 : 0) | (canDown ? 1 : 0);
+      let avail = (canUp ? 2 : 0) | (canDown ? 1 : 0);
+      if (avail !== 0 && ((slot.x + 6) & 0xf) >= 12) {
+        avail = 0;
+      }
+      slot.avail = avail;
+
+      if (avail === 0) return false;
+      if ((b & (UP | DOWN)) === 0) return false;
       const matched = ((b & (UP | DOWN)) >> 2) & avail;
       if (matched === 0) return false;
       if (matched !== 1 && row === 0) return false;
@@ -114,6 +123,7 @@
           slot.state = 0;
           slot.kind = null;
           slot.n = 0;
+          slot.avail = 0;
           return;
         }
         if (slot.dir & DOWN) {
@@ -126,11 +136,14 @@
         slot.state = 6;
         slot.kind = "cont";
         slot.n = 1;
+        const rowBits = slot.cr & 0xf0;
+        slot.avail = (rowBits !== 0 ? 1 : 0) | (rowBits !== 0x70 ? 2 : 0);
         return;
       }
       slot.state = 3;
       slot.kind = arriveKind;
       slot.n = 1;
+      slot.avail = 0;
     }
 
     step(slot, world) {
@@ -400,6 +413,7 @@
         case 0x308: return m.bits;
         case 0x309: return m.x;
         case 0x30d: return m.prom;
+        case 0x30e: return m.avail;
         case 0x30f: return m.cr;
         case 0x312: return m.dir;
         case 0x313: return m.top_y;
@@ -408,6 +422,7 @@
         case 0x328: return s.bits;
         case 0x329: return s.x;
         case 0x32d: return s.prom;
+        case 0x32e: return s.avail;
         case 0x32f: return s.cr;
         case 0x332: return s.dir;
         case 0x333: return s.top_y;
