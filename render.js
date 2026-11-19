@@ -1,15 +1,18 @@
 (function (root) {
   "use strict";
 
-  const PALETTE_MARIO = {
-    R: "#e52521",
-    S: "#ffb878",
-    H: "#6b4218",
-    B: "#2050e8",
-    Y: "#f8d820",
-    W: "#ffffff"
+  // ヘルメットなし・特徴のない一般作業員パレット
+  const PALETTE_WORKER = {
+    H: "#4a321c",
+    S: "#f4be8c",
+    E: "#22242c",
+    T: "#6094b4",
+    D: "#456d88",
+    P: "#343c4e",
+    B: "#5a3820"
   };
 
+  // スパイク（親方）パレット
   const PALETTE_SPIKE = {
     K: "#3c4252",
     P: "#f09660",
@@ -19,143 +22,154 @@
     W: "#e6e6e6"
   };
 
-  // 16x24 ドット絵パターン（各行16文字）
-  const MARIO_IDLE = [
-    ".....RRRRRR.....",
-    "....RRRRRRRRR...",
-    "....HHHSSHS.....",
-    "...HSHSSSHSSS...",
-    "...HSHHSSSHSSS..",
-    "...HHSSSSHHHH...",
-    ".....SSSSSSS....",
-    "....RRBRRR......",
-    "...RRRBRRBRRR...",
-    "..RRRRBBBBRRRR..",
-    "..WW.RBYBBYR.WW.",
-    "..WW.BBBBBB..WW.",
-    ".....BBBBBB.....",
-    "....BBBBBBBB....",
-    "....BBBBBBBB....",
+  // 16x26 ドット絵（上1px余白 + 実体25px、足元は最下行 y=25 揃え）
+  const PLAYER_IDLE = [
+    "................",
+    ".....HHHHHH.....",
+    "....HHHHHHHH....",
+    "....HHHHHHHH....",
+    "....HHSSSSSS....",
+    "....HSSSSESS....",
+    "....HSSSSSSS....",
+    ".....SSSSSS.....",
+    "......SSSS......",
+    "....TTTTTTTT....",
+    "...TTTTTTTTTT...",
+    "...TDTTTTTTDT...",
+    "...TDTTTTTTDT...",
+    "...TDTTTTTTDT...",
+    "...SSTTTTTTSS...",
+    "....DDDDDDDD....",
+    "....PPPPPPPP....",
+    "....PPPPPPPP....",
+    "....PPP..PPP....",
+    "....PPP..PPP....",
+    "....PPP..PPP....",
+    "....PPP..PPP....",
+    "....PPP..PPP....",
     "....BBB..BBB....",
-    "....BBB..BBB....",
-    "...HHHH..HHHH...",
-    "..HHHHH..HHHHH..",
-    "................",
-    "................",
-    "................",
-    "................",
-    "................"
-  ];
-
-  const MARIO_WALK1 = [
-    ".....RRRRRR.....",
-    "....RRRRRRRRR...",
-    "....HHHSSHS.....",
-    "...HSHSSSHSSS...",
-    "...HSHHSSSHSSS..",
-    "...HHSSSSHHHH...",
-    ".....SSSSSSS....",
-    "....RRBRRR......",
-    "...RRRBRRBRRR...",
-    "..WW.RBBBBR.WW..",
-    "..WW.RBYBBR.WW..",
-    ".....BBBBBB.....",
-    "....BBBBBBBB....",
-    "....BBBBBBBB....",
     "....BBBB.BBBB...",
-    "...BBBB...BBBB..",
-    "..HHHH.....HHHH.",
-    "..HHH.......HHH.",
-    "................",
-    "................",
-    "................",
-    "................",
-    "................",
-    "................"
+    "....BBBB.BBBB..."
   ];
 
-  const MARIO_WALK2 = [
+  const PLAYER_WALK1 = [
     "................",
-    ".....RRRRRR.....",
-    "....RRRRRRRRR...",
-    "....HHHSSHS.....",
-    "...HSHSSSHSSS...",
-    "...HSHHSSSHSSS..",
-    "...HHSSSSHHHH...",
-    ".....SSSSSSS....",
-    "....RRBRRR......",
-    "...RRRBRRBR.....",
-    "...RRRBBBBRWW...",
-    "....BBBBBB.WW...",
-    "....BBBBBB......",
-    "....BBBBBBBB....",
-    ".....BBBBBBB....",
-    ".....BBBBBBB....",
-    "....HHHH..HHH...",
-    "...HHHH....HH...",
-    "................",
-    "................",
-    "................",
-    "................",
-    "................",
-    "................"
+    ".....HHHHHH.....",
+    "....HHHHHHHH....",
+    "....HHHHHHHH....",
+    "....HHSSSSSS....",
+    "....HSSSSESS....",
+    "....HSSSSSSS....",
+    ".....SSSSSS.....",
+    "......SSSS......",
+    "....TTTTTTTT....",
+    "...TTTTTTTTTT...",
+    "..TTDTTTTTTDTT..",
+    "..SSDTTTTTTDSS..",
+    "....TTTTTTTT....",
+    "....DDDDDDDD....",
+    "....PPPPPPPP....",
+    "....PPPPPPPP....",
+    "...PPPP..PPPP...",
+    "...PPP....PPP...",
+    "..PPP......PPP..",
+    "..PPP......PPP..",
+    "..PPP......PPP..",
+    "..PPP......PPP..",
+    "..BBB......BBB..",
+    "..BBBB.....BBBB.",
+    "..BBBB.....BBBB."
   ];
 
-  const MARIO_CLIMB1 = [
-    "..WW.RRRRRR.....",
-    "..WW.RRRRRRRR...",
-    "....RRRRRRRRRR..",
-    "....HHHHHHHHHH..",
-    "....HHHHHHHHHH..",
-    ".....HHHHHHHH...",
-    "....RRRRRRRR....",
-    "...RRRRRRRRRR...",
-    "...RRRBBBBBRR.WW",
-    "....BBBBBBBB..WW",
-    "....BBBBBBBB....",
-    "....BBBBBBBB....",
-    "....BBB..BBB....",
-    "....BBB..BBBB...",
-    "...HHHH...HHHH..",
-    "...HHH.....HHH..",
+  const PLAYER_WALK2 = [
     "................",
-    "................",
-    "................",
-    "................",
-    "................",
-    "................",
-    "................",
-    "................"
+    ".....HHHHHH.....",
+    "....HHHHHHHH....",
+    "....HHHHHHHH....",
+    "....HHSSSSSS....",
+    "....HSSSSESS....",
+    "....HSSSSSSS....",
+    ".....SSSSSS.....",
+    "......SSSS......",
+    "....TTTTTTTT....",
+    "...TTTTTTTTTT...",
+    "....TTTTTTTT....",
+    "....TTDTTDTT....",
+    "....TTSSSSDD....",
+    "....DDDDDDDD....",
+    "....PPPPPPPP....",
+    "....PPPPPPPP....",
+    ".....PPPPPP.....",
+    ".....PPPPPP.....",
+    ".....PPP.PPP....",
+    ".....PPP.PPP....",
+    ".....PPP.PPP....",
+    ".....PPP.PPP....",
+    ".....BBB.BBB....",
+    ".....BBBB.BBBB..",
+    ".....BBBB.BBBB.."
   ];
 
-  const MARIO_CLIMB2 = [
-    ".....RRRRRR..WW.",
-    "...RRRRRRRR..WW.",
-    "..RRRRRRRRRR....",
-    "..HHHHHHHHHH....",
-    "..HHHHHHHHHH....",
-    "...HHHHHHHH.....",
-    "....RRRRRRRR....",
-    "WW.RRBBBBBRRR...",
-    "WW..BBBBBBBB....",
-    "....BBBBBBBB....",
-    "....BBBBBBBB....",
-    "....BBB..BBB....",
-    "...BBBB..BBB....",
-    "..HHHH...HHHH...",
-    "..HHH.....HHH...",
+  const PLAYER_CLIMB1 = [
     "................",
+    ".....HHHHHH.....",
+    "....HHHHHHHH....",
+    "....HHHHHHHH....",
+    "....HHHHHHHH....",
+    "....HHHHHHHH....",
+    ".....HHHHHH.....",
+    "..SS..HHHH......",
+    "..SS.TTTTTTT....",
+    "...TTTTTTTTTT...",
+    "....TTTTTTTTSS..",
+    "....TTTTTTTTSS..",
+    "....TTTTTTTT....",
+    "....DDDDDDDD....",
+    "....PPPPPPPP....",
+    "....PPPPPPPP....",
+    "....PPPPPPPP....",
+    "....PPP..PPP....",
+    "....PPP..PPP....",
+    "....PPP..PPP....",
+    "....BBB..PPP....",
+    "....BBBB.PPP....",
+    ".........PPP....",
+    ".........BBB....",
+    ".........BBBB...",
+    ".........BBBB..."
+  ];
+
+  const PLAYER_CLIMB2 = [
     "................",
-    "................",
-    "................",
-    "................",
-    "................",
-    "................",
-    "................",
-    "................"
+    ".....HHHHHH.....",
+    "....HHHHHHHH....",
+    "....HHHHHHHH....",
+    "....HHHHHHHH....",
+    "....HHHHHHHH....",
+    ".....HHHHHH.....",
+    "......HHHH..SS..",
+    "....TTTTTTT.SS..",
+    "...TTTTTTTTTT...",
+    "..SSTTTTTTTT....",
+    "..SSTTTTTTTT....",
+    "....TTTTTTTT....",
+    "....DDDDDDDD....",
+    "....PPPPPPPP....",
+    "....PPPPPPPP....",
+    "....PPPPPPPP....",
+    "....PPP..PPP....",
+    "....PPP..PPP....",
+    "....PPP..PPP....",
+    "....PPP..BBB....",
+    "....PPP..BBBB...",
+    "....PPP.........",
+    "....BBB.........",
+    "....BBBB........",
+    "....BBBB........"
   ];
 
   const SPIKE_IDLE = [
+    "................",
     "....KKKKKKKK....",
     "...KKKKKKKKKK...",
     "..KKKKKKKKKKKK..",
@@ -163,26 +177,28 @@
     "...GGGPGGGPGG...",
     "...PPPPPPPPPP...",
     "....PPGGGGPP....",
-    "....GGGGGGGG....",
-    "...OOBOOOOOO....",
-    "..OOOBOOBOOOO...",
-    "..WW.OBOOBO..WW.",
-    "..WW.OOOOOO..WW.",
-    ".....OOOOOO.....",
+    ".....GGGGGG.....",
+    "....OOOOOOOO....",
+    "...OOBOOOOOOB...",
+    "...OOOBOOOOOO...",
+    "...OOOBOOOOOO...",
+    "...WWOOBOOOOWW..",
+    "...WWOOOOOOOO...",
     "....OOOOOOOO....",
     "....OOOOOOOO....",
     "....OOO..OOO....",
     "....OOO..OOO....",
-    "...GGGG..GGGG...",
-    "..GGGGG..GGGGG..",
-    "................",
-    "................",
-    "................",
-    "................",
-    "................"
+    "....OOO..OOO....",
+    "....OOO..OOO....",
+    "....OOO..OOO....",
+    "....OOO..OOO....",
+    "....GGG..GGG....",
+    "....GGGG.GGGG...",
+    "....GGGG.GGGG..."
   ];
 
   const SPIKE_WALK1 = [
+    "................",
     "....KKKKKKKK....",
     "...KKKKKKKKKK...",
     "..KKKKKKKKKKKK..",
@@ -190,23 +206,24 @@
     "...GGGPGGGPGG...",
     "...PPPPPPPPPP...",
     "....PPGGGGPP....",
-    "....GGGGGGGG....",
-    "...OOBOOOOOO....",
-    "..WW.OOOOOO.WW..",
-    "..WW.OBOOBO.WW..",
-    ".....OOOOOO.....",
+    ".....GGGGGG.....",
+    "....OOOOOOOO....",
+    "...OOBOOOOOOB...",
+    "..WWOOBOOOOOWW..",
+    "..WWOOOOOOOOOW..",
     "....OOOOOOOO....",
     "....OOOOOOOO....",
-    "....OOOO.OOOO...",
-    "...OOOO...OOOO..",
+    "....OOOOOOOO....",
+    "...OOOO..OOOO...",
+    "...OOO....OOO...",
+    "..OOO......OOO..",
+    "..OOO......OOO..",
+    "..OOO......OOO..",
+    "..OOO......OOO..",
+    "..OOO......OOO..",
+    "..GGG......GGG..",
     "..GGGG.....GGGG.",
-    "..GGG.......GGG.",
-    "................",
-    "................",
-    "................",
-    "................",
-    "................",
-    "................"
+    "..GGGG.....GGGG."
   ];
 
   const SPIKE_WALK2 = [
@@ -218,84 +235,90 @@
     "...GGGPGGGPGG...",
     "...PPPPPPPPPP...",
     "....PPGGGGPP....",
-    "....GGGGGGGG....",
-    "...OOBOOOOOO....",
-    "...OOOBOOOOWW...",
-    "....OOOOOO.WW...",
-    "....OOOOOO......",
+    ".....GGGGGG.....",
     "....OOOOOOOO....",
-    ".....OOOOOOO....",
-    ".....OOOOOOO....",
-    "....GGGG..GGG...",
-    "...GGGG....GG...",
-    "................",
-    "................",
-    "................",
-    "................",
-    "................",
-    "................"
+    "...OOBOOOOOOB...",
+    "....OOBOOOOO....",
+    "....OOOOOWW.....",
+    "....OOOOOWW.....",
+    "....OOOOOOOO....",
+    "....OOOOOOOO....",
+    ".....OOOOOO.....",
+    ".....OOOOOO.....",
+    ".....OOO.OOO....",
+    ".....OOO.OOO....",
+    ".....OOO.OOO....",
+    ".....OOO.OOO....",
+    ".....OOO.OOO....",
+    ".....GGG.GGG....",
+    ".....GGGG.GGGG..",
+    ".....GGGG.GGGG.."
   ];
 
   const SPIKE_CLIMB1 = [
-    "..WW.KKKKKKKK...",
-    "..WWKKKKKKKKKK..",
-    "...KKKKKKKKKKKK.",
-    "....KKKKKKKKKK..",
-    "....KKKKKKKKKK..",
-    ".....OOOOOOOO...",
-    "....OOOOOOOOOO..",
-    "...OOOOOOOOOO.WW",
-    "...OOBBBBBBOO.WW",
+    "................",
+    "....KKKKKKKK....",
+    "...KKKKKKKKKK...",
+    "..KKKKKKKKKKKK..",
+    "...KKKKKKKKKK...",
+    "...KKKKKKKKKK...",
+    "....KKKKKKKK....",
+    "..WW.KKKKKK.....",
+    "..WW.OOOOOOO....",
+    "...OOOOOOOOOO...",
+    "....OOOOOOOOWW..",
+    "....OOOOOOOOWW..",
+    "....OOOOOOOO....",
+    "....OOBBBBBO....",
+    "....OOOOOOOO....",
     "....OOOOOOOO....",
     "....OOOOOOOO....",
     "....OOO..OOO....",
-    "....OOO..OOOO...",
-    "...GGGG...GGGG..",
-    "...GGG.....GGG..",
-    "................",
-    "................",
-    "................",
-    "................",
-    "................",
-    "................",
-    "................",
-    "................",
-    "................"
+    "....OOO..OOO....",
+    "....OOO..OOO....",
+    "....GGG..OOO....",
+    "....GGGG.OOO....",
+    ".........OOO....",
+    ".........GGG....",
+    ".........GGGG...",
+    ".........GGGG..."
   ];
 
   const SPIKE_CLIMB2 = [
-    "...KKKKKKKK..WW.",
-    "..KKKKKKKKKK.WW.",
-    ".KKKKKKKKKKKK...",
-    "..KKKKKKKKKK....",
-    "..KKKKKKKKKK....",
-    "...OOOOOOOO.....",
-    "..OOOOOOOOOO....",
-    "WW.OOOOOOOOOO...",
-    "WW.OOBBBBBBOO...",
+    "................",
+    "....KKKKKKKK....",
+    "...KKKKKKKKKK...",
+    "..KKKKKKKKKKKK..",
+    "...KKKKKKKKKK...",
+    "...KKKKKKKKKK...",
+    "....KKKKKKKK....",
+    ".....KKKKKK..WW.",
+    "....OOOOOOO..WW.",
+    "...OOOOOOOOOO...",
+    "..WWOOOOOOOO....",
+    "..WWOOOOOOOO....",
+    "....OOOOOOOO....",
+    "....OOBBBBBO....",
+    "....OOOOOOOO....",
     "....OOOOOOOO....",
     "....OOOOOOOO....",
     "....OOO..OOO....",
-    "...OOOO..OOO....",
-    "..GGGG...GGGG...",
-    "..GGG.....GGG...",
-    "................",
-    "................",
-    "................",
-    "................",
-    "................",
-    "................",
-    "................",
-    "................",
-    "................"
+    "....OOO..OOO....",
+    "....OOO..OOO....",
+    "....OOO..GGG....",
+    "....OOO..GGGG...",
+    "....OOO.........",
+    "....GGG.........",
+    "....GGGG........",
+    "....GGGG........"
   ];
 
   function bakeSprite(rows, palette, flipX) {
     const c = document.createElement("canvas");
     c.width = 16;
-    c.height = 24;
+    c.height = 26;
     const g = c.getContext("2d");
-    for (let y = 0; y < 24; y++) {
+    for (let y = 0; y < 26; y++) {
       const line = rows[y] || "";
       for (let x = 0; x < 16; x++) {
         const ch = line[x];
@@ -324,13 +347,13 @@
       this.ctx.imageSmoothingEnabled = false;
       this.marioSprites = makeSpriteSet(
         {
-          idle: MARIO_IDLE,
-          walk1: MARIO_WALK1,
-          walk2: MARIO_WALK2,
-          climb1: MARIO_CLIMB1,
-          climb2: MARIO_CLIMB2
+          idle: PLAYER_IDLE,
+          walk1: PLAYER_WALK1,
+          walk2: PLAYER_WALK2,
+          climb1: PLAYER_CLIMB1,
+          climb2: PLAYER_CLIMB2
         },
-        PALETTE_MARIO
+        PALETTE_WORKER
       );
       this.spikeSprites = makeSpriteSet(
         {
@@ -371,7 +394,6 @@
         const yTop = row * 32;
 
         if (val === 1) {
-          // はしご（上段床との接続）
           ctx.fillStyle = "#d89040";
           ctx.fillRect(x + 2, yTop, 2, 32);
           ctx.fillRect(x + 12, yTop, 2, 32);
@@ -380,7 +402,6 @@
             ctx.fillRect(x + 2, yTop + ry, 12, 2);
           }
         } else if (val === 8) {
-          // 壁8（床の上に立つ破壊不可壁イメージ）
           ctx.fillStyle = "#883828";
           ctx.fillRect(x, yTop + 6, 16, 26);
           ctx.fillStyle = "#c05838";
@@ -399,15 +420,17 @@
     pickFrame(slot) {
       const facing = (slot.dir & 2) ? "L" : "R";
       if (slot.state === 2) {
-        const idx = ((slot.prom >> 2) & 1) ? "climb2" : "climb1";
+        const idx = ((slot.prom >> 3) & 1) ? "climb2" : "climb1";
         return idx + "_" + facing;
       }
       if (slot.state === 3) {
-        const idx = ((slot.n >> 1) & 1) ? "climb2" : "climb1";
-        return idx + "_" + facing;
+        if (slot.kind === "arrive" || slot.kind === "arrive_top") {
+          return "idle_" + facing;
+        }
+        return "climb1_" + facing;
       }
       if (slot.state === 1) {
-        const idx = ((slot.x >> 2) & 1) ? "walk2" : "walk1";
+        const idx = ((slot.x >> 3) & 1) ? "walk2" : "walk1";
         return idx + "_" + facing;
       }
       return "idle_" + facing;
@@ -416,10 +439,8 @@
     drawActor(slot, sprites) {
       const img = sprites[this.pickFrame(slot)];
       if (!img) return;
-      // スロットの y は足元基準として (y - 20) 付近に配置（16x24の下余白4pxを考慮）
-      const drawY = slot.y - 19;
+      const drawY = slot.y - 26;
       this.ctx.drawImage(img, slot.x, drawY);
-      // 画面右端ループ時（x > 240）は左端にもはみ出し描画
       if (slot.x > 240) {
         this.ctx.drawImage(img, slot.x - 256, drawY);
       }
