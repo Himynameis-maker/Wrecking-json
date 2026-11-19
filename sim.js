@@ -34,7 +34,7 @@
       this.top_y = 32;      // $0313/$0333
       this.cr = 0x15;       // $030F/$032F
       this.n = 0;           // 境界ステートの経過フレーム
-      this.kind = null;     // 'enter' / 'arrive' / 'arrive_top' / 'enter_top'
+      this.kind = null;     // 'enter' / 'arrive' / 'arrive_top' / 'enter_top' / 'cont' / 'enter_top_cont'
       this.prom = 0;        // $030D/$032D
     }
 
@@ -45,6 +45,22 @@
 
   // マリオ・親方 共通移動ステートマシン（$BB78〜 準拠）
   class MarioSpikeStepper {
+    updateCR(slot) {
+      slot.cr = (((((slot.y - 32) & 0xff) >> 1) & 0xf0) | (((slot.x + 8) & 0xff) >> 4));
+    }
+
+    isContinuousLadder(cr, world) {
+      return cr < 0x70 &&
+        world.getTile(0x500 + cr) === 1 &&
+        world.getTile(0x500 + cr + 0x10) === 1;
+    }
+
+    snapIfContLadderIdle(slot, world) {
+      if (world.getTile(0x500 + slot.cr) === 1 && world.getTile(0x500 + slot.cr + 0x10) === 1) {
+        slot.x = (slot.x + 8) & 0xf0;
+      }
+    }
+
     canPassWall(slot, b, world) {
       if ((slot.x & 0x0f) !== 0) return true;
       const targetPos = (b & RIGHT) ? ((slot.cr + 1) & 0xff) : ((slot.cr - 1) & 0xff);
@@ -77,11 +93,48 @@
         slot.kind = "enter";
         slot.n = 1;
       }
+      if (this.isContinuousLadder(slot.cr, world)) {
+        if (slot.dir === UP) {
+          slot.state = 2;
+          slot.kind = null;
+          slot.n = 0;
+        } else {
+          slot.state = 6;
+          slot.kind = "enter_top_cont";
+          slot.n = 1;
+        }
+      }
       return true;
     }
 
+    finishLadderSegment(slot, world, arriveKind) {
+      this.updateCR(slot);
+      if (this.isContinuousLadder(slot.cr, world)) {
+        if ((slot.cr & 0xf0) === 0) {
+          slot.state = 0;
+          slot.kind = null;
+          slot.n = 0;
+          return;
+        }
+        if (slot.dir & DOWN) {
+          slot.top_y = slot.y;
+          slot.prom = 31;
+        } else {
+          slot.top_y = (slot.y - 32) & 0xff;
+          slot.prom = 1;
+        }
+        slot.state = 6;
+        slot.kind = "cont";
+        slot.n = 1;
+        return;
+      }
+      slot.state = 3;
+      slot.kind = arriveKind;
+      slot.n = 1;
+    }
+
     step(slot, world) {
-      slot.cr = (((((slot.y - 32) & 0xff) >> 1) & 0xf0) | (((slot.x + 8) & 0xff) >> 4));
+      this.updateCR(slot);
       const b = slot.bits;
 
       if (slot.state === 0) {
@@ -89,10 +142,15 @@
         if (b & (LEFT | RIGHT)) {
           slot.dir = b & (LEFT | RIGHT);
           slot.y = (slot.y + 8) & 0xe0;
-          if (!this.canPassWall(slot, b, world)) return;
+          if (!this.canPassWall(slot, b, world)) {
+            this.snapIfContLadderIdle(slot, world);
+            return;
+          }
           slot.prom = 0;
           slot.state = 1;
+          return;
         }
+        this.snapIfContLadderIdle(slot, world);
       } else if (slot.state === 1) {
         if (this.tryEnterLadder(slot, b, world)) return;
         if (!this.canPassWall(slot, b, world)) {
@@ -117,6 +175,29 @@
         }
         if (slot.n >= limit) {
           slot.state = (slot.kind === "enter" || slot.kind === "enter_top") ? 2 : 0;
+          slot.kind = null;
+          slot.n = 0;
+        }
+      } else if (slot.state === 6) {
+        if (b & (LEFT | RIGHT)) {
+          slot.dir = b & (LEFT | RIGHT);
+          if (slot.prom < 10) {
+            slot.y = (slot.y + 8) & 0xe0;
+            if (this.canPassWall(slot, b, world)) {
+              slot.prom = 0;
+              slot.state = 1;
+              slot.kind = null;
+              slot.n = 0;
+              return;
+            }
+          }
+        }
+        slot.n += 1;
+        const limit = slot.kind === "enter_top_cont" ? 16 : 12;
+        if (slot.n >= limit) {
+          slot.state = 2;
+          slot.kind = null;
+          slot.n = 0;
         }
       } else if (slot.state === 2) {
         if (b & (UP | DOWN)) {
@@ -126,15 +207,11 @@
           if (slot.prom >= 32) {
             slot.y = slot.top_y;
             slot.prom = 0;
-            slot.state = 3;
-            slot.kind = "arrive_top";
-            slot.n = 1;
+            this.finishLadderSegment(slot, world, "arrive_top");
           } else if (slot.prom <= 0) {
             slot.y = (slot.top_y + 32) & 0xff;
             slot.prom = 0;
-            slot.state = 3;
-            slot.kind = "arrive";
-            slot.n = 1;
+            this.finishLadderSegment(slot, world, "arrive");
           } else {
             slot.y = (slot.top_y + relYOfProm(slot.prom)) & 0xff;
           }
@@ -142,7 +219,8 @@
         }
         if (b & (LEFT | RIGHT)) {
           slot.dir = b & (LEFT | RIGHT);
-          if (slot.prom < 10) {
+          const canExit = slot.prom < 10 || (slot.prom >= 31 && this.isContinuousLadder(slot.cr, world));
+          if (canExit) {
             slot.y = (slot.y + 8) & 0xe0;
             if (!this.canPassWall(slot, b, world)) return;
             slot.prom = 0;
