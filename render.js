@@ -9,6 +9,7 @@
     T: "#6094b4",
     D: "#456d88",
     P: "#343c4e",
+    Q: "#232936",
     B: "#5a3820"
   };
 
@@ -18,6 +19,7 @@
     P: "#f09660",
     G: "#14161e",
     O: "#dc6820",
+    M: "#9e4612",
     B: "#f8d820",
     W: "#e6e6e6"
   };
@@ -35,9 +37,9 @@
     "......SSSS......",
     "....TTTTTTTT....",
     "...TTTTTTTTTT...",
-    "...TDTTTTTTDT...",
-    "...TDTTTTTTDT...",
-    "...TDTTTTTTDT...",
+    "...TTDTTTTTDT...",
+    "...TTDTTTTTDT...",
+    "...TTDTTTTTDT...",
     "...SSTTTTTTSS...",
     "....DDDDDDDD....",
     "....PPPPPPPP....",
@@ -54,34 +56,6 @@
 
   const PLAYER_WALK1 = [
     "................",
-    ".....HHHHHH.....",
-    "....HHHHHHHH....",
-    "....HHHHHHHH....",
-    "....HHSSSSSS....",
-    "....HSSSSESS....",
-    "....HSSSSSSS....",
-    ".....SSSSSS.....",
-    "......SSSS......",
-    "....TTTTTTTT....",
-    "...TTTTTTTTTT...",
-    "..TTDTTTTTTDTT..",
-    "..SSDTTTTTTDSS..",
-    "....TTTTTTTT....",
-    "....DDDDDDDD....",
-    "....PPPPPPPP....",
-    "....PPPPPPPP....",
-    "...PPPP..PPPP...",
-    "...PPP....PPP...",
-    "..PPP......PPP..",
-    "..PPP......PPP..",
-    "..PPP......PPP..",
-    "..PPP......PPP..",
-    "..BBB......BBB..",
-    "..BBBB.....BBBB.",
-    "..BBBB.....BBBB."
-  ];
-
-  const PLAYER_WALK2 = [
     "................",
     ".....HHHHHH.....",
     "....HHHHHHHH....",
@@ -93,21 +67,49 @@
     "......SSSS......",
     "....TTTTTTTT....",
     "...TTTTTTTTTT...",
-    "....TTTTTTTT....",
-    "....TTDTTDTT....",
-    "....TTSSSSDD....",
+    "...TTTTDDDDTT...",
+    "...TTTTTTDDDTSS.",
+    "....TTTTTTTDDSS.",
     "....DDDDDDDD....",
     "....PPPPPPPP....",
+    "....QQQPPPPPP...",
+    "...QQQ....PPPP..",
+    "..QQQ......PPP..",
+    "..QQ........PPP.",
+    "..QQ........PPP.",
+    "..QQ........PPP.",
+    "..BB........BBB.",
+    "..BBB.......BBBB",
+    "..BBB.......BBBB"
+  ];
+
+  const PLAYER_WALK2 = [
+    "................",
+    "................",
+    ".....HHHHHH.....",
+    "....HHHHHHHH....",
+    "....HHHHHHHH....",
+    "....HHSSSSSS....",
+    "....HSSSSESS....",
+    "....HSSSSSSS....",
+    ".....SSSSSS.....",
+    "......SSSS......",
+    "....TTTTTTTT....",
+    "...TTTTTTTTTT...",
+    "..DDTTTTTTTT....",
+    ".SSDDTTTTTTT....",
+    ".SSDDTTTTTT.....",
+    "....DDDDDDDD....",
     "....PPPPPPPP....",
-    ".....PPPPPP.....",
-    ".....PPPPPP.....",
-    ".....PPP.PPP....",
-    ".....PPP.PPP....",
-    ".....PPP.PPP....",
-    ".....PPP.PPP....",
-    ".....BBB.BBB....",
-    ".....BBBB.BBBB..",
-    ".....BBBB.BBBB.."
+    "...PPPPPPQQQ....",
+    "..PPPP....QQQ...",
+    "..PPP......QQQ..",
+    ".PPP........QQ..",
+    ".PPP........QQ..",
+    ".PPP........QQ..",
+    ".BBB........BB..",
+    "BBBB.......BBB..",
+    "BBBB.......BBB.."
   ];
 
   const PLAYER_CLIMB1 = [
@@ -131,10 +133,10 @@
     "....PPP..PPP....",
     "....PPP..PPP....",
     "....PPP..PPP....",
+    "....PPP..PPP....",
     "....BBB..PPP....",
     "....BBBB.PPP....",
-    ".........PPP....",
-    ".........BBB....",
+    "....BBBB.BBB....",
     ".........BBBB...",
     ".........BBBB..."
   ];
@@ -160,10 +162,10 @@
     "....PPP..PPP....",
     "....PPP..PPP....",
     "....PPP..PPP....",
+    "....PPP..PPP....",
     "....PPP..BBB....",
     "....PPP..BBBB...",
-    "....PPP.........",
-    "....BBB.........",
+    "....BBB..BBBB...",
     "....BBBB........",
     "....BBBB........"
   ];
@@ -199,34 +201,6 @@
 
   const SPIKE_WALK1 = [
     "................",
-    "....KKKKKKKK....",
-    "...KKKKKKKKKK...",
-    "..KKKKKKKKKKKK..",
-    "...GGGPPPPGGG...",
-    "...GGGPGGGPGG...",
-    "...PPPPPPPPPP...",
-    "....PPGGGGPP....",
-    ".....GGGGGG.....",
-    "....OOOOOOOO....",
-    "...OOBOOOOOOB...",
-    "..WWOOBOOOOOWW..",
-    "..WWOOOOOOOOOW..",
-    "....OOOOOOOO....",
-    "....OOOOOOOO....",
-    "....OOOOOOOO....",
-    "...OOOO..OOOO...",
-    "...OOO....OOO...",
-    "..OOO......OOO..",
-    "..OOO......OOO..",
-    "..OOO......OOO..",
-    "..OOO......OOO..",
-    "..OOO......OOO..",
-    "..GGG......GGG..",
-    "..GGGG.....GGGG.",
-    "..GGGG.....GGGG."
-  ];
-
-  const SPIKE_WALK2 = [
     "................",
     "....KKKKKKKK....",
     "...KKKKKKKKKK...",
@@ -238,21 +212,49 @@
     ".....GGGGGG.....",
     "....OOOOOOOO....",
     "...OOBOOOOOOB...",
-    "....OOBOOOOO....",
-    "....OOOOOWW.....",
-    "....OOOOOWW.....",
+    "...OOOOBOOOOO...",
+    "...OOOOOOBOOOWW.",
+    "....OOOOOOOOOWW.",
     "....OOOOOOOO....",
     "....OOOOOOOO....",
-    ".....OOOOOO.....",
-    ".....OOOOOO.....",
-    ".....OOO.OOO....",
-    ".....OOO.OOO....",
-    ".....OOO.OOO....",
-    ".....OOO.OOO....",
-    ".....OOO.OOO....",
-    ".....GGG.GGG....",
-    ".....GGGG.GGGG..",
-    ".....GGGG.GGGG.."
+    "....MMMOOOOOO...",
+    "...MMM....OOOO..",
+    "..MMM......OOO..",
+    "..MM........OOO.",
+    "..MM........OOO.",
+    "..MM........OOO.",
+    "..GG........GGG.",
+    "..GGG.......GGGG",
+    "..GGG.......GGGG"
+  ];
+
+  const SPIKE_WALK2 = [
+    "................",
+    "................",
+    "....KKKKKKKK....",
+    "...KKKKKKKKKK...",
+    "..KKKKKKKKKKKK..",
+    "...GGGPPPPGGG...",
+    "...GGGPGGGPGG...",
+    "...PPPPPPPPPP...",
+    "....PPGGGGPP....",
+    ".....GGGGGG.....",
+    "....OOOOOOOO....",
+    "...OOBOOOOOOB...",
+    "..OOBOOOOOOO....",
+    ".WWBOOOOOOOO....",
+    ".WWOOOOOOOO.....",
+    "....OOOOOOOO....",
+    "....OOOOOOOO....",
+    "...OOOOOOMMM....",
+    "..OOOO....MMM...",
+    "..OOO......MMM..",
+    ".OOO........MM..",
+    ".OOO........MM..",
+    ".OOO........MM..",
+    ".GGG........GG..",
+    "GGGG.......GGG..",
+    "GGGG.......GGG.."
   ];
 
   const SPIKE_CLIMB1 = [
@@ -276,10 +278,10 @@
     "....OOO..OOO....",
     "....OOO..OOO....",
     "....OOO..OOO....",
+    "....OOO..OOO....",
     "....GGG..OOO....",
     "....GGGG.OOO....",
-    ".........OOO....",
-    ".........GGG....",
+    "....GGGG.GGG....",
     ".........GGGG...",
     ".........GGGG..."
   ];
@@ -305,10 +307,10 @@
     "....OOO..OOO....",
     "....OOO..OOO....",
     "....OOO..OOO....",
+    "....OOO..OOO....",
     "....OOO..GGG....",
     "....OOO..GGGG...",
-    "....OOO.........",
-    "....GGG.........",
+    "....GGG..GGGG...",
     "....GGGG........",
     "....GGGG........"
   ];
@@ -430,7 +432,8 @@
         return "climb1_" + facing;
       }
       if (slot.state === 1) {
-        const idx = ((slot.x >> 3) & 1) ? "walk2" : "walk1";
+        const cycle = ["walk1", "idle", "walk2", "idle"];
+        const idx = cycle[(slot.x >> 2) & 3];
         return idx + "_" + facing;
       }
       return "idle_" + facing;
