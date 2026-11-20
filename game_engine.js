@@ -13,6 +13,10 @@
     WALL: 0x08,          // 互換エイリアス（ドラム缶）
     DRUM: 0x08,          // ドラム缶（横通行不可・上乗れる・壊せない）
     HOLE: 0x09,
+    CRUMBLING_1: 0x51,   // 壊れかけはしご（残1）
+    CRUMBLING_2: 0x52,   // 壊れかけはしご（残2）
+    CRUMBLING_3: 0x53,   // 壊れかけはしご（残3）
+    CRUMBLING_4: 0x54,   // 壊れかけはしご（残4）
     WALL_1: 0xc1,        // 1回壊せる壁
     WALL_2: 0x92,        // 2回壊せる壁
     WALL_3: 0xa3,        // 3回壊せる壁
@@ -26,6 +30,10 @@
 
   function isLadderTile(t) {
     return t === TILE.LADDER || t === TILE.BREAK_LADDER;
+  }
+
+  function isCrumblingLadderTile(t) {
+    return t >= 0x51 && t <= 0x55;
   }
 
   function isSameLadderType(t1, t2) {
@@ -56,6 +64,12 @@
     0, 1, 0, 1, 1, 2, 1, 2, 2, 2, 3, 2, 3, -1
   ];
 
+  // State 10 被弾跳ねY差分テーブル（上へ-10px跳ねて戻り、以降は毎F+2落下）
+  const KNOCKDOWN_DY = [
+    -2, -2, -1, -2, -1, -1, 0, -1, 0, 0,
+     0,  0,  1,  0,  1,  2, 1,  1, 2, 1, 1
+  ];
+
   function relYOfProm(prom) {
     if (prom <= 4) return 31;
     if (prom <= 9) return 27;
@@ -81,13 +95,14 @@
       this.row = 1;
       this.col = 5;
       this.flag = 0;     // bit1 = ドラム缶頭上
-      this.n = 0;        // 境界ステート経過F
+      this.n = 0;        // 境界ステート経過F / State 10 カウンタ
       this.kind = null;
       this.prom = 0;
       this.hammerTimer = 0;
       this.hammerHitDone = false;
       this.isGolden = false;
       this.prevHammer = false;
+      this.stunTimer = 0;
     }
   }
 
@@ -114,10 +129,114 @@
         isSameLadderType(world.getTile(row, col), world.getTile(row + 1, col));
     }
 
+    isContinuousLadderSegment(row, col, world) {
+      if (row < 0 || row >= world.rows - 1) return false;
+      const t = world.getTile(row, col);
+      const b = world.getTile(row + 1, col);
+      if (isSameLadderType(t, b)) return true;
+      if (t === TILE.BREAK_LADDER && isCrumblingLadderTile(b)) return true;
+      if (isCrumblingLadderTile(t) && world.hasCrumblingBelowSame(row, col)) return true;
+      return false;
+    }
+
     snapIfContLadderIdle(slot, world) {
       if (this.isContinuousLadder(slot.row, slot.col, world)) {
         this.snapX(slot, world);
       }
+    }
+
+    enterKnockdown(slot) {
+      slot.state = 10;
+      slot.n = 0;
+      slot.kind = null;
+      slot.prom = 0;
+      slot.aux = 0;
+      slot.auxRow = 0;
+      slot.flag &= ~0x02;
+      slot.hammerTimer = 0;
+      slot.hammerHitDone = false;
+      slot.stunTimer = 0;
+    }
+
+    checkLadderHoldHazard(slot, world, ladderRow) {
+      const t = world.getTile(ladderRow, slot.col);
+      if (isLadderTile(t)) return false;
+      if (isCrumblingLadderTile(t)) {
+        const info = world.getCrumblingInfo(ladderRow, slot.col);
+        const stage = info ? info.stage : (t & 0x07);
+        if (!slot.isMario || stage <= 2) {
+          this.enterKnockdown(slot);
+          return true;
+        }
+        return false;
+      }
+      this.enterKnockdown(slot);
+      return true;
+    }
+
+    checkHazardHit(slot, world) {
+      if (slot.state === 10 || slot.state === 11) return false;
+
+      if (world.explosions.length > 0) {
+        const isHoldingLadder = slot.state === 2 ||
+          slot.state === 6 ||
+          (slot.state === 3 && slot.kind !== "arrive" && slot.kind !== "arrive_top");
+        const checkRow = isHoldingLadder
+          ? Math.max(0, Math.min(world.rows - 1, Math.floor(slot.topY / 32)))
+          : (slot.state === 5
+            ? Math.max(0, Math.min(world.rows - 1, Math.floor((slot.y - 16) / 32)))
+            : slot.row);
+
+        for (let i = 0; i < world.explosions.length; i++) {
+          const ex = world.explosions[i];
+          if (ex.col !== slot.col || ex.row !== checkRow) continue;
+          if (ex.kind === "bomb") {
+            if (ex.age >= 21 || ex.byMario !== slot.isMario) {
+              this.enterKnockdown(slot);
+              return true;
+            }
+          } else if (ex.kind === "wall") {
+            if (ex.byMario !== slot.isMario) {
+              this.enterKnockdown(slot);
+              return true;
+            }
+          }
+        }
+      }
+
+      if (world.crumblingLadders.size > 0 && !(slot.flag & 2)) {
+        const onFloorState = slot.state === 0 ||
+          slot.state === 1 ||
+          slot.state === 4 ||
+          slot.state === 8 ||
+          slot.state === 9 ||
+          (slot.state === 3 && (slot.kind === "arrive" || slot.kind === "arrive_top"));
+
+        if (onFloorState) {
+          const t = world.getTile(slot.row, slot.col);
+          if (isCrumblingLadderTile(t)) {
+            const info = world.getCrumblingInfo(slot.row, slot.col);
+            const stage = info ? info.stage : (t & 0x07);
+            if (!slot.isMario) {
+              if (stage >= 2) {
+                this.enterKnockdown(slot);
+                return true;
+              }
+            } else if (stage <= 2 && slot.row < world.rows - 1 && info && info.hasBelowSame) {
+              const belowTile = world.getTile(slot.row + 1, slot.col);
+              const belowInfo = world.getCrumblingInfo(slot.row + 1, slot.col);
+              const belowFalling = isHoleTile(belowTile) ||
+                (belowInfo ? belowInfo.stage <= 2 : (isCrumblingLadderTile(belowTile) && (belowTile & 0x07) <= 2));
+              if (belowFalling) {
+                this.enterKnockdown(slot);
+                return true;
+              }
+            }
+          }
+        }
+      }
+
+      return false;
     }
 
     canPassWall(slot, b, world) {
@@ -294,7 +413,7 @@
 
     finishLadderSegment(slot, world, arriveKind) {
       this.updateCR(slot, world);
-      if (this.isContinuousLadder(slot.row, slot.col, world)) {
+      if (this.isContinuousLadderSegment(slot.row, slot.col, world)) {
         if (slot.row === 0) {
           slot.state = 0;
           slot.kind = null;
@@ -315,6 +434,10 @@
         slot.avail = (slot.row !== 0 ? 1 : 0) | (slot.row < world.rows - 1 ? 2 : 0);
         return;
       }
+      if (slot.row < world.rows - 1 && isHoleTile(world.getTile(slot.row, slot.col))) {
+        this.enterKnockdown(slot);
+        return;
+      }
       slot.state = 3;
       slot.kind = arriveKind;
       slot.n = 1;
@@ -323,6 +446,56 @@
 
     step(slot, world) {
       this.updateCR(slot, world);
+
+      if (slot.state === 10) {
+        const dy = slot.n < KNOCKDOWN_DY.length ? KNOCKDOWN_DY[slot.n] : 2;
+        slot.n += 1;
+        slot.y += dy;
+
+        const maxFloorY = world.rows * 32;
+        const bottomRow = world.rows - 1;
+        const bottomDrumY = bottomRow * 32 + 0x0b;
+        const canCheckLanding = slot.n >= KNOCKDOWN_DY.length || dy > 0;
+
+        if (canCheckLanding &&
+            slot.y >= bottomDrumY &&
+            isSolidDrum(world.getTile(bottomRow, slot.col))) {
+          slot.y = bottomDrumY;
+          slot.topY = bottomDrumY;
+          slot.flag |= 2;
+          slot.prom = 0;
+          slot.n = 0;
+          slot.state = 11;
+          slot.stunTimer = slot.isMario ? 30 : 45;
+          this.updateCR(slot, world);
+          return;
+        }
+
+        if (canCheckLanding && slot.y >= maxFloorY) {
+          slot.y = maxFloorY;
+          slot.topY = maxFloorY;
+          slot.flag &= ~0x02;
+          slot.prom = 0;
+          slot.n = 0;
+          slot.state = 11;
+          slot.stunTimer = slot.isMario ? 30 : 45;
+          this.updateCR(slot, world);
+          return;
+        }
+        slot.topY = slot.y;
+        return;
+      }
+
+      if (slot.state === 11) {
+        slot.stunTimer -= 1;
+        if (slot.stunTimer <= 0) {
+          slot.stunTimer = 0;
+          slot.state = 0;
+        }
+        return;
+      }
+
+      if (this.checkHazardHit(slot, world)) return;
       const b = slot.bits;
 
       if (slot.state === 0) {
@@ -375,14 +548,7 @@
       } else if (slot.state === 3) {
         if (slot.kind !== "arrive" && slot.kind !== "arrive_top") {
           const ladderRow = Math.max(0, Math.min(world.rows - 1, Math.floor(slot.topY / 32)));
-          if (!isLadderTile(world.getTile(ladderRow, slot.col))) {
-            slot.state = 5;
-            slot.prom = slot.isMario ? 0 : 0x12;
-            slot.topY = slot.y;
-            slot.kind = null;
-            slot.n = 0;
-            return;
-          }
+          if (this.checkLadderHoldHazard(slot, world, ladderRow)) return;
         }
         slot.n += 1;
         let limit = 6;
@@ -423,7 +589,7 @@
           this.updateCR(slot, world);
           const t = world.getTile(slot.row, slot.col);
           const isHole = isHoleTile(t) && (slot.row < world.rows - 1);
-          const isContLad = this.isContinuousLadder(slot.row, slot.col, world);
+          const isContLad = this.isContinuousLadderSegment(slot.row, slot.col, world);
           if (!isHole && !isContLad) {
             slot.state = 0;
             slot.prom = 0;
@@ -447,14 +613,7 @@
         slot.y = slot.topY;
       } else if (slot.state === 6) {
         const ladderRow = Math.max(0, Math.min(world.rows - 1, Math.floor(slot.topY / 32)));
-        if (!isLadderTile(world.getTile(ladderRow, slot.col))) {
-          slot.state = 5;
-          slot.prom = slot.isMario ? 0 : 0x12;
-          slot.topY = slot.y;
-          slot.kind = null;
-          slot.n = 0;
-          return;
-        }
+        if (this.checkLadderHoldHazard(slot, world, ladderRow)) return;
         if (b & (LEFT | RIGHT)) {
           slot.dir = b & (LEFT | RIGHT);
           slot.facing = slot.dir;
@@ -499,12 +658,7 @@
       } else if (slot.state === 2) {
         slot.flag &= ~0x02;
         const ladderRow = Math.max(0, Math.min(world.rows - 1, Math.floor(slot.topY / 32)));
-        if (!isLadderTile(world.getTile(ladderRow, slot.col))) {
-          slot.state = 5;
-          slot.prom = slot.isMario ? 0 : 0x12;
-          slot.topY = slot.y;
-          return;
-        }
+        if (this.checkLadderHoldHazard(slot, world, ladderRow)) return;
         const curTile = world.getTile(slot.row, slot.col);
         if (this.trySideTransition(slot, b, world)) return;
         if (b & (UP | DOWN)) {
@@ -531,7 +685,8 @@
         if (b & (LEFT | RIGHT)) {
           slot.dir = b & (LEFT | RIGHT);
           slot.facing = slot.dir;
-          const canExit = slot.prom < 10 || (slot.prom >= 31 && this.isContinuousLadder(slot.row, slot.col, world));
+          const canExit = slot.prom < 10 ||
+            (slot.prom >= 31 && this.isContinuousLadderSegment(slot.row, slot.col, world));
           if (canExit) {
             if ((slot.flag & 2) === 0) {
               this.snapY(slot);
@@ -669,6 +824,7 @@
       this.waves = [];
       this.explosions = [];
       this.breakEffects = [];
+      this.crumblingLadders = new Map();
       this.spikeAggressive = !!config.spikeAggressive;
 
       const stepper = new ActorStepper();
@@ -708,6 +864,19 @@
     wrapCol(col) {
       const c = this.cols;
       return ((col % c) + c) % c;
+    }
+
+    cellKey(row, col) {
+      return row + "," + this.wrapCol(col);
+    }
+
+    getCrumblingInfo(row, col) {
+      return this.crumblingLadders.get(this.cellKey(row, col)) || null;
+    }
+
+    hasCrumblingBelowSame(row, col) {
+      const info = this.getCrumblingInfo(row, col);
+      return info ? info.hasBelowSame : false;
     }
 
     loadTiles(src) {
@@ -753,6 +922,69 @@
       return count;
     }
 
+    startCrumblingLadder(row, col, byMario, spreadUp = true, spreadDown = true) {
+      if (row < 0 || row >= this.rows) return false;
+      const c = this.wrapCol(col);
+      if (this.getTile(row, c) !== TILE.BREAK_LADDER) return false;
+
+      const belowTile = row < this.rows - 1 ? this.getTile(row + 1, c) : TILE.EMPTY;
+      const hasBelowSame = row < this.rows - 1 &&
+        (belowTile === TILE.BREAK_LADDER || isCrumblingLadderTile(belowTile));
+
+      this.setTile(row, c, TILE.CRUMBLING_4);
+      this.crumblingLadders.set(this.cellKey(row, c), {
+        row,
+        col: c,
+        stage: 4,
+        timer: 8,
+        spreadTimer: 8,
+        spreadUp,
+        spreadDown,
+        hasBelowSame,
+        byMario: !!byMario
+      });
+      return true;
+    }
+
+    updateCrumblingLadders() {
+      if (this.crumblingLadders.size === 0) return;
+      const entries = Array.from(this.crumblingLadders.values());
+      const toSpread = [];
+
+      for (const e of entries) {
+        if (e.spreadUp || e.spreadDown) {
+          e.spreadTimer -= 1;
+          if (e.spreadTimer <= 0) {
+            if (e.spreadUp && e.row > 0 && this.getTile(e.row - 1, e.col) === TILE.BREAK_LADDER) {
+              toSpread.push({ row: e.row - 1, col: e.col, byMario: e.byMario, up: true, down: false });
+            }
+            if (e.spreadDown && e.row < this.rows - 1 && this.getTile(e.row + 1, e.col) === TILE.BREAK_LADDER) {
+              toSpread.push({ row: e.row + 1, col: e.col, byMario: e.byMario, up: false, down: true });
+            }
+            e.spreadUp = false;
+            e.spreadDown = false;
+          }
+        }
+
+        e.timer -= 1;
+        if (e.timer <= 0) {
+          e.stage -= 1;
+          e.timer = 8;
+          if (e.stage <= 0) {
+            this.crumblingLadders.delete(this.cellKey(e.row, e.col));
+            this.setTile(e.row, e.col, e.hasBelowSame ? TILE.HOLE : TILE.EMPTY);
+            this.breakEffects.push({ row: e.row, col: e.col, tile: TILE.BREAK_LADDER, timer: 16, maxTimer: 16 });
+          } else {
+            this.setTile(e.row, e.col, 0x50 + e.stage);
+          }
+        }
+      }
+
+      for (const s of toSpread) {
+        this.startCrumblingLadder(s.row, s.col, s.byMario, s.up, s.down);
+      }
+    }
+
     hitCell(row, col, byMario) {
       const c = this.wrapCol(col);
       if (row < 0 || row >= this.rows) return false;
@@ -760,16 +992,12 @@
       if (!isBreakableTile(tile)) return false;
 
       if (tile === TILE.BOMB) {
-        this.triggerBomb(row, c);
+        this.triggerBomb(row, c, byMario);
         return true;
       }
 
       if (tile === TILE.BREAK_LADDER) {
-        const hasBelowSame = row < this.rows - 1 &&
-          this.getTile(row + 1, c) === TILE.BREAK_LADDER;
-        this.setTile(row, c, hasBelowSame ? TILE.HOLE : TILE.EMPTY);
-        this.breakEffects.push({ row, col: c, tile, timer: 16, maxTimer: 16 });
-        return true;
+        return this.startCrumblingLadder(row, c, byMario, true, true);
       }
 
       const hp = tile & 0x07;
@@ -782,18 +1010,30 @@
       return true;
     }
 
-    triggerBomb(row, col) {
+    triggerBomb(row, col, byMario) {
       const c = this.wrapCol(col);
       this.setTile(row, c, TILE.EMPTY);
-      this.explosions.push({ row, col: c, timer: 18, maxTimer: 18 });
-      this.waves.push({ row, col: this.wrapCol(c - 1), dir: -1, timer: 10, stepsLeft: this.cols - 1 });
-      this.waves.push({ row, col: this.wrapCol(c + 1), dir: 1, timer: 10, stepsLeft: this.cols - 1 });
+      this.explosions.push({
+        row,
+        col: c,
+        timer: 26,
+        maxTimer: 26,
+        age: 0,
+        kind: "bomb",
+        byMario: !!byMario
+      });
+      this.waves.push({ row, col: this.wrapCol(c - 1), dir: -1, timer: 10, stepsLeft: this.cols - 1, byMario: !!byMario });
+      this.waves.push({ row, col: this.wrapCol(c + 1), dir: 1, timer: 10, stepsLeft: this.cols - 1, byMario: !!byMario });
     }
 
     updateEffectsAndWaves() {
+      this.updateCrumblingLadders();
+
       for (let i = this.explosions.length - 1; i >= 0; i--) {
-        this.explosions[i].timer -= 1;
-        if (this.explosions[i].timer <= 0) {
+        const ex = this.explosions[i];
+        ex.age = (ex.age || 0) + 1;
+        ex.timer -= 1;
+        if (ex.timer <= 0) {
           this.explosions.splice(i, 1);
         }
       }
@@ -822,20 +1062,25 @@
 
         triggeredCells.add(key);
         if (t === TILE.BOMB) {
-          this.setTile(w.row, w.col, TILE.EMPTY);
-          this.explosions.push({ row: w.row, col: w.col, timer: 18, maxTimer: 18 });
-          nextWaves.push({ row: w.row, col: this.wrapCol(w.col - 1), dir: -1, timer: 10, stepsLeft: this.cols - 1 });
-          nextWaves.push({ row: w.row, col: this.wrapCol(w.col + 1), dir: 1, timer: 10, stepsLeft: this.cols - 1 });
+          this.triggerBomb(w.row, w.col, w.byMario);
         } else {
-          this.explosions.push({ row: w.row, col: w.col, timer: 14, maxTimer: 14 });
-          this.hitCell(w.row, w.col, false);
+          this.hitCell(w.row, w.col, w.byMario);
+          const afterTile = this.getTile(w.row, w.col);
+          if (t === TILE.BREAK_LADDER) {
+            this.explosions.push({ row: w.row, col: w.col, timer: 10, maxTimer: 10, age: 0, kind: "spark", byMario: !!w.byMario });
+          } else if (afterTile === TILE.EMPTY) {
+            this.explosions.push({ row: w.row, col: w.col, timer: 16, maxTimer: 16, age: 0, kind: "wall", byMario: !!w.byMario });
+          } else {
+            this.explosions.push({ row: w.row, col: w.col, timer: 10, maxTimer: 10, age: 0, kind: "spark", byMario: !!w.byMario });
+          }
           if (w.stepsLeft > 1) {
             nextWaves.push({
               row: w.row,
               col: this.wrapCol(w.col + w.dir),
               dir: w.dir,
               timer: 10,
-              stepsLeft: w.stepsLeft - 1
+              stepsLeft: w.stepsLeft - 1,
+              byMario: !!w.byMario
             });
           }
         }
@@ -847,7 +1092,7 @@
       const sp = this.spike;
       const ma = this.mario;
       sp.bits &= ~HAMMER;
-      if (sp.state === 4) return;
+      if (sp.state === 4 || sp.state === 10 || sp.state === 11) return;
 
       const tile = this.getTile(sp.row, sp.col);
       if (tile === TILE.BOMB || !isBreakableTile(tile)) return;
@@ -891,6 +1136,7 @@
     getHammerTiming,
     isBreakableTile,
     isLadderTile,
+    isCrumblingLadderTile,
     isSameLadderType,
     isHoleTile,
     isSolidDrum,

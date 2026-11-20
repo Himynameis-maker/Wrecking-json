@@ -16,6 +16,7 @@
     BREAK_LADDER: 0xd1
   };
   const isHoleTile = G.isHoleTile || (t => t >= 0x09 && t <= 0x0b);
+  const isCrumblingLadderTile = G.isCrumblingLadderTile || (t => t >= 0x51 && t <= 0x55);
   const isSameLadderType = G.isSameLadderType || ((a, b) =>
     (a === TILE.LADDER && b === TILE.LADDER) ||
     (a === TILE.BREAK_LADDER && b === TILE.BREAK_LADDER));
@@ -452,6 +453,47 @@
       }
     }
 
+    drawCrumblingLadder(ctx, x, yTop, stage, frame) {
+      const blink = ((frame >> 1) & 1) === 0;
+      const sideColor = stage <= 2 && blink ? "#ffd0e0" : "#b84468";
+      const rungColor = stage <= 2 && blink ? "#ffffff" : "#ff88a8";
+
+      if (stage >= 4) {
+        ctx.fillStyle = sideColor;
+        ctx.fillRect(x + 2, yTop + 2, 2, 28);
+        ctx.fillRect(x + 12, yTop + 2, 2, 28);
+        ctx.fillStyle = rungColor;
+        for (let ry = 4; ry < 30; ry += 6) {
+          ctx.fillRect(x + 2, yTop + ry, 4, 2);
+          ctx.fillRect(x + 10, yTop + ry, 4, 2);
+        }
+      } else if (stage === 3) {
+        ctx.fillStyle = sideColor;
+        ctx.fillRect(x + 2, yTop + 4, 2, 10);
+        ctx.fillRect(x + 2, yTop + 18, 2, 10);
+        ctx.fillRect(x + 12, yTop + 6, 2, 10);
+        ctx.fillRect(x + 12, yTop + 20, 2, 8);
+        ctx.fillStyle = rungColor;
+        for (let ry = 6; ry < 28; ry += 7) {
+          ctx.fillRect(x + 3, yTop + ry, 3, 2);
+          ctx.fillRect(x + 10, yTop + ry, 3, 2);
+        }
+      } else if (stage === 2) {
+        ctx.fillStyle = sideColor;
+        ctx.fillRect(x + 2, yTop + 6, 2, 7);
+        ctx.fillRect(x + 12, yTop + 17, 2, 8);
+        ctx.fillStyle = rungColor;
+        ctx.fillRect(x + 3, yTop + 8, 4, 2);
+        ctx.fillRect(x + 9, yTop + 19, 4, 2);
+        ctx.fillRect(x + 6, yTop + 13, 3, 2);
+      } else {
+        ctx.fillStyle = rungColor;
+        ctx.fillRect(x + 3, yTop + 7, 2, 3);
+        ctx.fillRect(x + 11, yTop + 14, 2, 3);
+        ctx.fillRect(x + 5, yTop + 22, 3, 2);
+      }
+    }
+
     drawBreakableWall(ctx, x, yTop, tile) {
       const hp = tile & 0x07;
       const group = tile & 0x70; // 0x40=1回壁, 0x10=2回壁, 0x20=3回壁
@@ -581,7 +623,11 @@
         for (let col = 0; col < world.cols; col++) {
           const tile = world.getTile(row, col);
           const belowTile = !isBottomRow ? world.getTile(row + 1, col) : TILE.EMPTY;
-          const isContLad = !isBottomRow && isSameLadderType(tile, belowTile);
+          const isContLad = !isBottomRow && (
+            isSameLadderType(tile, belowTile) ||
+            (tile === TILE.BREAK_LADDER && isCrumblingLadderTile(belowTile)) ||
+            (isCrumblingLadderTile(tile) && world.hasCrumblingBelowSame && world.hasCrumblingBelowSame(row, col))
+          );
           const x = col * 16;
 
           if (!isBottomRow && (isHoleTile(tile) || isContLad)) {
@@ -626,6 +672,10 @@
               ctx.fillRect(x + 2, yTop + ry, 5, 2);
               ctx.fillRect(x + 9, yTop + ry, 5, 2);
             }
+          } else if (isCrumblingLadderTile(val)) {
+            const info = world.getCrumblingInfo ? world.getCrumblingInfo(row, col) : null;
+            const stage = info ? info.stage : (val & 0x07);
+            this.drawCrumblingLadder(ctx, x, yTop, stage, world.f);
           } else if (val === TILE.DRUM) {
             this.drawDrum(ctx, x, yTop);
           } else if (val === TILE.BOMB) {
@@ -653,18 +703,38 @@
       this.drawActor(world.spike, this.spikeSprites, w, world);
       this.drawActor(world.mario, this.marioSprites, w, world);
 
-      // 爆風エフェクト
+      // 爆風・崩落煙エフェクト
       if (world.explosions) {
         for (const ex of world.explosions) {
           const cx = ex.col * 16 + 8;
           const cy = ex.row * 32 + 16;
           const phase = (ex.timer >> 1) & 1;
-          const r = Math.max(4, Math.round(11 * (ex.timer / ex.maxTimer)));
-          ctx.fillStyle = phase ? "#ff4820" : "#ff9820";
-          ctx.fillRect(cx - r, cy - 4, r * 2, 8);
-          ctx.fillRect(cx - 4, cy - r, 8, r * 2);
-          ctx.fillStyle = phase ? "#fff058" : "#ffffff";
-          ctx.fillRect(cx - Math.max(2, r - 4), cy - Math.max(2, r - 4), Math.max(4, (r - 4) * 2), Math.max(4, (r - 4) * 2));
+
+          if (ex.kind === "spark") {
+            ctx.fillStyle = phase ? "#fff080" : "#ff9840";
+            ctx.fillRect(cx - 4, cy - 1, 8, 2);
+            ctx.fillRect(cx - 1, cy - 4, 2, 8);
+          } else if (ex.kind === "wall") {
+            const r = Math.max(3, Math.round(8 * (ex.timer / ex.maxTimer)));
+            ctx.fillStyle = phase ? "#e89840" : "#b86830";
+            ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
+            ctx.fillStyle = "#fff090";
+            ctx.fillRect(cx - 2, cy - 2, 4, 4);
+          } else {
+            const isAllDanger = (ex.age || 0) >= 21;
+            const r = isAllDanger
+              ? 12
+              : Math.max(5, Math.round(10 * (0.4 + 0.6 * (ex.timer / ex.maxTimer))));
+            ctx.fillStyle = isAllDanger
+              ? (phase ? "#ff2820" : "#ffffff")
+              : (phase ? "#ff5820" : "#ffa820");
+            ctx.fillRect(cx - r, cy - 4, r * 2, 8);
+            ctx.fillRect(cx - 4, cy - r, 8, r * 2);
+            ctx.fillStyle = isAllDanger
+              ? (phase ? "#ffff80" : "#ff5020")
+              : (phase ? "#fff058" : "#ffffff");
+            ctx.fillRect(cx - Math.max(2, r - 4), cy - Math.max(2, r - 4), Math.max(4, (r - 4) * 2), Math.max(4, (r - 4) * 2));
+          }
         }
       }
 
@@ -675,6 +745,13 @@
       const faceVal = slot.facing || slot.dir;
       const facing = (faceVal & 2) ? "L" : "R";
 
+      if (slot.state === 10) {
+        const idx = ((world ? world.f >> 2 : 0) & 1) ? "walk1" : "walk2";
+        return idx + "_" + facing;
+      }
+      if (slot.state === 11) {
+        return "idle_" + facing;
+      }
       if (slot.state === 4) {
         return "idle_" + facing;
       }
@@ -788,7 +865,31 @@
     drawActorAt(slot, sprites, baseX, drawY, world) {
       const img = sprites[this.pickFrame(slot, world)];
       if (!img) return;
-      this.ctx.drawImage(img, baseX, drawY);
+      const ctx = this.ctx;
+
+      if (slot.state === 10) {
+        ctx.save();
+        ctx.translate(baseX, drawY + 26);
+        ctx.scale(1, -1);
+        ctx.drawImage(img, 0, 0);
+        ctx.restore();
+        return;
+      }
+
+      if (slot.state === 11) {
+        const shakeX = ((world ? world.f >> 1 : 0) & 1) ? 1 : -1;
+        ctx.drawImage(img, baseX + shakeX, drawY + 2);
+        const f = world ? world.f : 0;
+        const sx1 = baseX + 7 + Math.round(Math.cos(f * 0.35) * 5);
+        const sx2 = baseX + 7 + Math.round(Math.cos(f * 0.35 + Math.PI) * 5);
+        ctx.fillStyle = "#ffec48";
+        ctx.fillRect(sx1, drawY - 3, 2, 2);
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(sx2, drawY - 1, 2, 2);
+        return;
+      }
+
+      ctx.drawImage(img, baseX, drawY);
       if (slot.state === 4) {
         this.drawHammerOverlay(slot, baseX, drawY);
       }
