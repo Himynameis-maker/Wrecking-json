@@ -5,13 +5,41 @@
   const LEFT = 2;
   const DOWN = 4;
   const UP = 8;
+  const HAMMER = 16;
 
   const TILE = {
-    EMPTY: 0,
-    LADDER: 1,
-    WALL: 8,
-    HOLE: 9
+    EMPTY: 0x00,
+    LADDER: 0x01,
+    WALL: 0x08,          // 互換エイリアス（ドラム缶）
+    DRUM: 0x08,          // ドラム缶（横通行不可・上乗れる・壊せない）
+    HOLE: 0x09,
+    WALL_1: 0xc1,        // 1回壊せる壁
+    WALL_2: 0x92,        // 2回壊せる壁
+    WALL_3: 0xa3,        // 3回壊せる壁
+    BOMB: 0xb1,          // 爆弾
+    BREAK_LADDER: 0xd1   // 壊せるはしご
   };
+
+  function isBreakableTile(t) {
+    return (t & 0x80) !== 0;
+  }
+
+  function isLadderTile(t) {
+    return t === TILE.LADDER || t === TILE.BREAK_LADDER;
+  }
+
+  function isSameLadderType(t1, t2) {
+    return (t1 === TILE.LADDER && t2 === TILE.LADDER) ||
+      (t1 === TILE.BREAK_LADDER && t2 === TILE.BREAK_LADDER);
+  }
+
+  function isHoleTile(t) {
+    return t >= 0x09 && t <= 0x0b;
+  }
+
+  function isSolidDrum(t) {
+    return t === TILE.DRUM;
+  }
 
   // State 5 落下速度テーブル（前半=Mario用, 後半$12〜=Spike用）
   const FALL_TABLE = [
@@ -38,14 +66,18 @@
       this.x = 80;
       this.y = 64;
       this.dir = 4;
+      this.facing = RIGHT;
       this.topY = 32;    // State 2/3/6:上端Y, State 5:前Y
       this.avail = 0;
       this.row = 1;
       this.col = 5;
-      this.flag = 0;     // bit1 = 壁8頭上
+      this.flag = 0;     // bit1 = ドラム缶頭上
       this.n = 0;        // 境界ステート経過F
       this.kind = null;
       this.prom = 0;
+      this.hammerTimer = 0;
+      this.hammerHitDone = false;
+      this.isGolden = false;
     }
   }
 
@@ -69,8 +101,7 @@
     isContinuousLadder(row, col, world) {
       return row >= 0 &&
         row < world.rows - 1 &&
-        world.getTile(row, col) === TILE.LADDER &&
-        world.getTile(row + 1, col) === TILE.LADDER;
+        isSameLadderType(world.getTile(row, col), world.getTile(row + 1, col));
     }
 
     snapIfContLadderIdle(slot, world) {
@@ -84,20 +115,36 @@
       const targetCol = world.wrapCol(slot.col + ((b & RIGHT) ? 1 : -1));
       const tile = world.getTile(slot.row, targetCol);
       if (slot.flag & 2) {
-        if (tile === TILE.LADDER) {
-          return slot.row < world.rows - 1 && world.getTile(slot.row + 1, targetCol) === TILE.LADDER;
+        if (isLadderTile(tile)) {
+          return slot.row < world.rows - 1 &&
+            isSameLadderType(tile, world.getTile(slot.row + 1, targetCol));
         }
-        return tile === TILE.HOLE;
+        return isHoleTile(tile);
       }
-      return tile !== TILE.WALL;
+      return !isSolidDrum(tile);
+    }
+
+    tryStartHammer(slot, b, world) {
+      if ((b & HAMMER) === 0) return false;
+      const curTile = world.getTile(slot.row, slot.col);
+      if (isLadderTile(curTile) && slot.row < world.rows - 1) {
+        const belowTile = world.getTile(slot.row + 1, slot.col);
+        if (isSameLadderType(curTile, belowTile)) {
+          return false;
+        }
+      }
+      slot.state = 4;
+      slot.hammerTimer = 0;
+      slot.hammerHitDone = false;
+      return true;
     }
 
     tryEnterHole(slot, world) {
       if (slot.row >= world.rows - 1) return false;
       if (slot.flag & 2) {
-        if (world.getTile(slot.row + 1, slot.col) === TILE.WALL) return false;
+        if (isSolidDrum(world.getTile(slot.row + 1, slot.col))) return false;
       } else {
-        if (world.getTile(slot.row, slot.col) !== TILE.HOLE) return false;
+        if (!isHoleTile(world.getTile(slot.row, slot.col))) return false;
       }
       if (((slot.x + 3) & 0x0f) >= 6) return false;
 
@@ -118,10 +165,10 @@
 
       if (slot.state !== 1) {
         const curTile = world.getTile(slot.row, slot.col);
-        if (curTile !== TILE.LADDER && curTile !== TILE.HOLE) return false;
+        if (!isLadderTile(curTile) && !isHoleTile(curTile)) return false;
         if (slot.row >= world.rows - 1) return false;
         const belowTile = world.getTile(slot.row + 1, slot.col);
-        if (belowTile !== TILE.LADDER) return false;
+        if (!isLadderTile(belowTile)) return false;
       }
 
       const dirStep = (horiz === RIGHT) ? 1 : -1;
@@ -129,16 +176,16 @@
       const nextTile = world.getTile(slot.row, nextCol);
       let goDirectlyToApply = false;
 
-      if (slot.state !== 1 && nextTile === TILE.HOLE) {
+      if (slot.state !== 1 && isHoleTile(nextTile)) {
         if ((slot.y & 0x1f) >= 0x0b &&
             slot.row < world.rows - 1 &&
-            world.getTile(slot.row + 1, nextCol) === TILE.WALL) {
+            isSolidDrum(world.getTile(slot.row + 1, nextCol))) {
           if (slot.prom < 0x0f) return false;
           slot.y = Math.floor(slot.y / 32) * 32 + 0x0b;
         }
         if (slot.row < world.rows - 1) {
           const nextBelow = world.getTile(slot.row + 1, nextCol);
-          if (nextBelow === TILE.LADDER && (slot.y & 0x0f) !== 0 && slot.prom < 0x1f) {
+          if (isLadderTile(nextBelow) && (slot.y & 0x0f) !== 0 && slot.prom < 0x1f) {
             goDirectlyToApply = true;
           }
         }
@@ -149,15 +196,16 @@
             slot.aux = 0x0c;
           }
           slot.dir = horiz;
+          slot.facing = horiz;
           return true;
         }
       }
 
       if (!goDirectlyToApply) {
-        if (nextTile !== TILE.LADDER) return false;
+        if (!isLadderTile(nextTile)) return false;
         if (slot.row >= world.rows - 1) return false;
         const nextBelow = world.getTile(slot.row + 1, nextCol);
-        if (nextBelow !== TILE.LADDER) return false;
+        if (!isSameLadderType(nextTile, nextBelow)) return false;
 
         const onContCur = this.isContinuousLadder(slot.row, slot.col, world);
         if (!onContCur && slot.state === 1) {
@@ -182,15 +230,16 @@
       }
       slot.state = 9;
       slot.dir = horiz;
+      slot.facing = horiz;
       return true;
     }
 
     tryEnterLadder(slot, b, world) {
       const curTile = world.getTile(slot.row, slot.col);
-      if (curTile === TILE.HOLE) return false;
+      if (isHoleTile(curTile)) return false;
 
-      const canUp = curTile === TILE.LADDER;
-      const canDown = slot.row < world.rows - 1 && world.getTile(slot.row + 1, slot.col) === TILE.LADDER;
+      const canUp = isLadderTile(curTile);
+      const canDown = slot.row < world.rows - 1 && isLadderTile(world.getTile(slot.row + 1, slot.col));
       let avail = (canUp ? 2 : 0) | (canDown ? 1 : 0);
       if (avail !== 0 && ((slot.x + 6) & 0x0f) >= 12) {
         avail = 0;
@@ -267,9 +316,11 @@
       const b = slot.bits;
 
       if (slot.state === 0) {
+        if (this.tryStartHammer(slot, b, world)) return;
         if (this.tryEnterLadder(slot, b, world)) return;
         if (b & (LEFT | RIGHT)) {
           slot.dir = b & (LEFT | RIGHT);
+          slot.facing = slot.dir;
           if ((slot.flag & 2) === 0) {
             this.snapY(slot);
           }
@@ -283,6 +334,7 @@
         }
         this.snapIfContLadderIdle(slot, world);
       } else if (slot.state === 1) {
+        if (this.tryStartHammer(slot, b, world)) return;
         if (this.tryEnterLadder(slot, b, world)) return;
         if (this.tryEnterHole(slot, world)) return;
         if (this.trySideTransition(slot, b, world)) return;
@@ -298,7 +350,33 @@
           slot.state = 0;
           slot.dir = (slot.dir + 1) & 0xff;
         }
+      } else if (slot.state === 4) {
+        const totalFrames = slot.isMario ? (slot.isGolden ? 7 : 21) : 24;
+        const hitFrame = slot.isMario ? (slot.isGolden ? 5 : 15) : 12;
+        slot.hammerTimer += 1;
+        if (!slot.hammerHitDone && slot.hammerTimer >= hitFrame) {
+          slot.hammerHitDone = true;
+          world.hitCell(slot.row, slot.col, slot.isMario);
+        }
+        if (slot.hammerTimer >= totalFrames) {
+          slot.state = 0;
+          slot.hammerTimer = 0;
+          slot.hammerHitDone = false;
+        }
       } else if (slot.state === 3) {
+        if (slot.kind !== "arrive" && slot.kind !== "arrive_top") {
+          const targetRow = slot.kind === "enter_top"
+            ? Math.min(world.rows - 1, slot.row + 1)
+            : slot.row;
+          if (!isLadderTile(world.getTile(targetRow, slot.col))) {
+            slot.state = 5;
+            slot.prom = slot.isMario ? 0 : 0x12;
+            slot.topY = slot.y;
+            slot.kind = null;
+            slot.n = 0;
+            return;
+          }
+        }
         slot.n += 1;
         let limit = 6;
         if (slot.kind === "arrive_top") {
@@ -337,7 +415,7 @@
           this.snapY(slot);
           this.updateCR(slot, world);
           const t = world.getTile(slot.row, slot.col);
-          const isHole = (t === TILE.HOLE) && (slot.row < world.rows - 1);
+          const isHole = isHoleTile(t) && (slot.row < world.rows - 1);
           const isContLad = this.isContinuousLadder(slot.row, slot.col, world);
           if (!isHole && !isContLad) {
             slot.state = 0;
@@ -350,7 +428,7 @@
         if (yMod >= 0x0b &&
             yMod < 0x0f &&
             slot.row < world.rows - 1 &&
-            world.getTile(slot.row + 1, slot.col) === TILE.WALL) {
+            isSolidDrum(world.getTile(slot.row + 1, slot.col))) {
           slot.flag |= 2;
           slot.y = Math.floor(slot.y / 32) * 32 + 0x0b;
           slot.topY = Math.floor(slot.y / 16) * 16;
@@ -361,8 +439,20 @@
 
         slot.y = slot.topY;
       } else if (slot.state === 6) {
+        const targetRow = slot.kind === "enter_top_cont"
+          ? Math.min(world.rows - 1, slot.row + 1)
+          : slot.row;
+        if (!isLadderTile(world.getTile(targetRow, slot.col))) {
+          slot.state = 5;
+          slot.prom = slot.isMario ? 0 : 0x12;
+          slot.topY = slot.y;
+          slot.kind = null;
+          slot.n = 0;
+          return;
+        }
         if (b & (LEFT | RIGHT)) {
           slot.dir = b & (LEFT | RIGHT);
+          slot.facing = slot.dir;
           if (slot.prom < 10) {
             if ((slot.flag & 2) === 0) {
               this.snapY(slot);
@@ -403,13 +493,19 @@
         }
       } else if (slot.state === 2) {
         slot.flag &= ~0x02;
+        const curTile = world.getTile(slot.row, slot.col);
+        if (!isLadderTile(curTile)) {
+          slot.state = 5;
+          slot.prom = slot.isMario ? 0 : 0x12;
+          slot.topY = slot.y;
+          return;
+        }
         if (this.trySideTransition(slot, b, world)) return;
         if (b & (UP | DOWN)) {
           slot.dir = b & (UP | DOWN);
           const d = (slot.dir & DOWN) ? -1 : 1;
           const nextProm = slot.prom + d;
-          const curTile = world.getTile(slot.row, slot.col);
-          if (nextProm === 0x1f && (curTile === TILE.WALL || curTile === TILE.HOLE)) {
+          if (nextProm === 0x1f && (isSolidDrum(curTile) || isHoleTile(curTile))) {
             return;
           }
           slot.prom = nextProm;
@@ -428,6 +524,7 @@
         }
         if (b & (LEFT | RIGHT)) {
           slot.dir = b & (LEFT | RIGHT);
+          slot.facing = slot.dir;
           const canExit = slot.prom < 10 || (slot.prom >= 31 && this.isContinuousLadder(slot.row, slot.col, world));
           if (canExit) {
             if ((slot.flag & 2) === 0) {
@@ -486,14 +583,14 @@
 
       if (isRight) {
         for (let c = sp.col + 1; c < world.cols; c++) {
-          if (world.getTile(sp.row, c) === TILE.WALL) {
+          if (isSolidDrum(world.getTile(sp.row, c))) {
             wallCol = c;
             break;
           }
         }
       } else {
         for (let c = sp.col - 1; c >= 0; c--) {
-          if (world.getTile(sp.row, c) === TILE.WALL) {
+          if (isSolidDrum(world.getTile(sp.row, c))) {
             wallCol = c;
             break;
           }
@@ -525,7 +622,7 @@
       let found = false;
 
       for (let c = 0; c < world.cols; c++) {
-        if (world.getTile(searchRow, c) === TILE.LADDER) {
+        if (isLadderTile(world.getTile(searchRow, c))) {
           const dist = Math.abs(c - sp.col);
           if (dist < minDist) {
             minDist = dist;
@@ -563,6 +660,10 @@
       this.worldWidth = this.cols * 16;
       this.f = 0;
       this.tiles = new Uint8Array(this.cols * this.rows);
+      this.waves = [];
+      this.explosions = [];
+      this.breakEffects = [];
+      this.spikeAggressive = !!config.spikeAggressive;
 
       const stepper = new ActorStepper();
       this.stepper = stepper;
@@ -575,9 +676,15 @@
       }
       if (config.mario) {
         Object.assign(this.mario, config.mario);
+        if ((this.mario.dir & (LEFT | RIGHT)) !== 0) {
+          this.mario.facing = this.mario.dir & (LEFT | RIGHT);
+        }
       }
       if (config.spike) {
         Object.assign(this.spike, config.spike);
+        if ((this.spike.dir & (LEFT | RIGHT)) !== 0) {
+          this.spike.facing = this.spike.dir & (LEFT | RIGHT);
+        }
       }
       if (config.spikeAI) {
         Object.assign(this.spikeAI, config.spikeAI);
@@ -630,6 +737,121 @@
       return this.tiles[row * this.cols + wc];
     }
 
+    countBreakables() {
+      let count = 0;
+      for (let i = 0; i < this.tiles.length; i++) {
+        if (isBreakableTile(this.tiles[i])) {
+          count += 1;
+        }
+      }
+      return count;
+    }
+
+    hitCell(row, col, byMario) {
+      const c = this.wrapCol(col);
+      if (row < 0 || row >= this.rows) return false;
+      const tile = this.getTile(row, c);
+      if (!isBreakableTile(tile)) return false;
+
+      if (tile === TILE.BOMB) {
+        this.triggerBomb(row, c);
+        return true;
+      }
+
+      if (tile === TILE.BREAK_LADDER) {
+        const hasBelowSame = row < this.rows - 1 &&
+          this.getTile(row + 1, c) === TILE.BREAK_LADDER;
+        this.setTile(row, c, hasBelowSame ? TILE.HOLE : TILE.EMPTY);
+        this.breakEffects.push({ row, col: c, tile, timer: 16, maxTimer: 16 });
+        return true;
+      }
+
+      const hp = tile & 0x07;
+      if (hp > 1) {
+        this.setTile(row, c, tile - 1);
+      } else {
+        this.setTile(row, c, TILE.EMPTY);
+        this.breakEffects.push({ row, col: c, tile, timer: 16, maxTimer: 16 });
+      }
+      return true;
+    }
+
+    triggerBomb(row, col) {
+      const c = this.wrapCol(col);
+      this.setTile(row, c, TILE.EMPTY);
+      this.explosions.push({ row, col: c, timer: 18, maxTimer: 18 });
+      this.waves.push({ row, col: this.wrapCol(c - 1), dir: -1, timer: 10, stepsLeft: this.cols - 1 });
+      this.waves.push({ row, col: this.wrapCol(c + 1), dir: 1, timer: 10, stepsLeft: this.cols - 1 });
+    }
+
+    updateEffectsAndWaves() {
+      for (let i = this.explosions.length - 1; i >= 0; i--) {
+        this.explosions[i].timer -= 1;
+        if (this.explosions[i].timer <= 0) {
+          this.explosions.splice(i, 1);
+        }
+      }
+      for (let i = this.breakEffects.length - 1; i >= 0; i--) {
+        this.breakEffects[i].timer -= 1;
+        if (this.breakEffects[i].timer <= 0) {
+          this.breakEffects.splice(i, 1);
+        }
+      }
+
+      if (this.waves.length === 0) return;
+      const nextWaves = [];
+      const triggeredCells = new Set();
+
+      for (const w of this.waves) {
+        w.timer -= 1;
+        if (w.timer > 0) {
+          nextWaves.push(w);
+          continue;
+        }
+        const key = w.row + "," + w.col;
+        if (triggeredCells.has(key)) continue;
+
+        const t = this.getTile(w.row, w.col);
+        if (!isBreakableTile(t)) continue;
+
+        triggeredCells.add(key);
+        if (t === TILE.BOMB) {
+          this.setTile(w.row, w.col, TILE.EMPTY);
+          this.explosions.push({ row: w.row, col: w.col, timer: 18, maxTimer: 18 });
+          nextWaves.push({ row: w.row, col: this.wrapCol(w.col - 1), dir: -1, timer: 10, stepsLeft: this.cols - 1 });
+          nextWaves.push({ row: w.row, col: this.wrapCol(w.col + 1), dir: 1, timer: 10, stepsLeft: this.cols - 1 });
+        } else {
+          this.explosions.push({ row: w.row, col: w.col, timer: 14, maxTimer: 14 });
+          this.hitCell(w.row, w.col, false);
+          if (w.stepsLeft > 1) {
+            nextWaves.push({
+              row: w.row,
+              col: this.wrapCol(w.col + w.dir),
+              dir: w.dir,
+              timer: 10,
+              stepsLeft: w.stepsLeft - 1
+            });
+          }
+        }
+      }
+      this.waves = nextWaves;
+    }
+
+    updateSpikeHammer() {
+      const sp = this.spike;
+      const ma = this.mario;
+      sp.bits &= ~HAMMER;
+      if (sp.state === 4) return;
+
+      const tile = this.getTile(sp.row, sp.col);
+      if (tile === TILE.BOMB || !isBreakableTile(tile)) return;
+
+      const sameCell = sp.row === ma.row && sp.col === ma.col;
+      if (sameCell || this.spikeAggressive) {
+        sp.bits |= HAMMER;
+      }
+    }
+
     step(inputBits = 0) {
       let b = inputBits;
       if ((b & (LEFT | RIGHT)) === (LEFT | RIGHT)) {
@@ -645,14 +867,22 @@
       if (this.f % 2 === 1) {
         this.spikeAI.update(this);
       }
+      this.updateSpikeHammer();
       this.stepper.step(this.spike, this);
+
+      this.updateEffectsAndWaves();
       this.f += 1;
     }
   }
 
   const api = {
-    RIGHT, LEFT, DOWN, UP,
+    RIGHT, LEFT, DOWN, UP, HAMMER,
     TILE,
+    isBreakableTile,
+    isLadderTile,
+    isSameLadderType,
+    isHoleTile,
+    isSolidDrum,
     Actor,
     ActorStepper,
     SpikeAI,

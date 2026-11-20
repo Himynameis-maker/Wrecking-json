@@ -70,8 +70,8 @@
       display: flex;
       align-items: center;
       justify-content: space-between;
-      gap: 12px;
-      padding: 4px 6px;
+      gap: 16px;
+      padding: 4px 12px;
     }
     .stick-base {
       position: relative;
@@ -106,8 +106,29 @@
       box-shadow: 0 3px 10px rgba(0, 0, 0, 0.5);
       pointer-events: none;
     }
+    .action-btn {
+      width: 88px;
+      height: 88px;
+      border-radius: 50%;
+      background: radial-gradient(circle at 35% 35%, #ff6b5b, #b8281c);
+      border: 3px solid #ffa498;
+      color: #fff;
+      font-weight: bold;
+      font-size: 0.85rem;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+      touch-action: none;
+      user-select: none;
+      -webkit-user-select: none;
+      flex-shrink: 0;
+      padding: 0;
+    }
+    .action-btn.pressed {
+      transform: scale(0.93);
+      background: radial-gradient(circle at 35% 35%, #ff9587, #d63527);
+    }
     .hud {
-      flex: 1;
+      width: 100%;
+      max-width: 580px;
       font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
       font-size: 0.76rem;
       background: #181c26;
@@ -131,7 +152,8 @@
   <div class="topbar">
     <div class="btn-row">
       <select id="stageSelect" aria-label="ステージ選択">
-        <option value="standard8">標準16×8（穴・壁・連続はしご・上下カメラ）</option>
+        <option value="hammerDemo">ハンマー＆破壊テスト（16×8）</option>
+        <option value="standard8">標準16×8（穴・ドラム缶・連続はしご）</option>
         <option value="wide10">拡大20×10（マップ拡大テスト）</option>
         <option value="compact6">小型12×6（狭小テスト）</option>
         <option value="u6">U6 基準（16×6・はしご1本）</option>
@@ -158,18 +180,20 @@
       <div class="stick-cross-v"></div>
       <div id="stickKnob" class="stick-knob"></div>
     </div>
-    <div id="hud" class="hud">読み込み中...</div>
+    <button id="hammerBtn" class="action-btn" type="button" aria-label="ハンマー">HAMMER</button>
   </div>
 
+  <div id="hud" class="hud">読み込み中...</div>
+
   <div class="hint">
-    操作: 画面の擬似スティック（iPhone/マウス） または キーボード（矢印キー / WASD）
+    操作: 擬似スティック ＋ HAMMERボタン（iPhone/マウス） / 矢印・WASD ＋ Space・Z・J（PC）
   </div>
 
   <script src="./game_engine.js"></script>
   <script src="./render.js"></script>
   <script>
     (function () {
-      const { RIGHT, LEFT, DOWN, UP, TILE, GameWorld } = window.WreckGame;
+      const { RIGHT, LEFT, DOWN, UP, HAMMER, TILE, GameWorld } = window.WreckGame;
       const { Renderer } = window.WreckRender;
 
       const canvas = document.getElementById("gameCanvas");
@@ -180,28 +204,51 @@
       const resetBtn = document.getElementById("resetBtn");
       const pauseBtn = document.getElementById("pauseBtn");
       const stepBtn = document.getElementById("stepBtn");
+      const hammerBtn = document.getElementById("hammerBtn");
       const hudEl = document.getElementById("hud");
       const stickBase = document.getElementById("stickBase");
       const stickKnob = document.getElementById("stickKnob");
 
       const L = TILE.LADDER;
-      const W = TILE.WALL;
+      const D = TILE.DRUM;
       const H = TILE.HOLE;
+      const W1 = TILE.WALL_1;
+      const W2 = TILE.WALL_2;
+      const W3 = TILE.WALL_3;
+      const B = TILE.BOMB;
+      const BL = TILE.BREAK_LADDER;
 
       const STAGES = {
+        hammerDemo: {
+          cols: 16,
+          rows: 8,
+          tiles: [
+            // 上段：壁・爆弾・ドラム缶テスト
+            [2, 3, W2], [2, 4, W1], [2, 5, B], [2, 6, W3], [2, 8, L], [2, 11, D],
+            [3, 8, L], [3, 11, H],
+            // 中段：異種はしご(col3) と 同種連続壊せるはしご(col6)＋横の爆弾(col5)
+            [4, 3, L], [4, 5, B], [4, 6, BL], [4, 8, L], [4, 12, H], [4, 14, W1],
+            [5, 3, BL], [5, 6, BL], [5, 8, L], [5, 12, D], [5, 14, W2],
+            // 下段（行6）：1/2/3回壁 と 爆弾連鎖（ヒビ経由含む）テスト
+            [6, 4, W1], [6, 5, W2], [6, 6, W3], [6, 8, L],
+            [6, 10, B], [6, 11, W1], [6, 12, W2], [6, 13, W1], [6, 14, B], [6, 15, W3],
+            [7, 0, D], [7, 15, D]
+          ],
+          mario: { x: 32, y: 224 },
+          spike: { x: 160, y: 192 }
+        },
         standard8: {
           cols: 16,
           rows: 8,
           tiles: [
-            // 連続はしご・穴・壁乗り・横飛び・左右ループ確認用
             [0, 5, H], [0, 6, H], [0, 10, L],
-            [1, 3, L], [1, 5, W], [1, 6, L], [1, 10, L], [1, 13, W],
+            [1, 3, L], [1, 5, D], [1, 6, L], [1, 10, L], [1, 13, D],
             [2, 3, L], [2, 6, L], [2, 8, H], [2, 10, L],
-            [3, 2, W], [3, 6, L], [3, 8, W], [3, 12, L],
-            [4, 4, L], [4, 7, H], [4, 12, L], [4, 14, W],
-            [5, 4, L], [5, 7, L], [5, 9, W], [5, 11, H],
-            [6, 2, L], [6, 7, L], [6, 11, W], [6, 14, L],
-            [7, 0, W], [7, 15, W]
+            [3, 2, D], [3, 6, L], [3, 8, D], [3, 12, L],
+            [4, 4, L], [4, 7, H], [4, 12, L], [4, 14, D],
+            [5, 4, L], [5, 7, L], [5, 9, D], [5, 11, H],
+            [6, 2, L], [6, 7, L], [6, 11, D], [6, 14, L],
+            [7, 0, D], [7, 15, D]
           ],
           mario: { x: 48, y: 224 },
           spike: { x: 208, y: 64 }
@@ -211,14 +258,14 @@
           rows: 10,
           tiles: [
             [0, 4, L], [0, 9, H], [0, 15, L],
-            [1, 4, L], [1, 9, W], [1, 12, H], [1, 15, L], [1, 18, W],
-            [2, 2, W], [2, 4, L], [2, 7, L], [2, 12, L], [2, 15, L],
-            [3, 7, L], [3, 10, W], [3, 12, L], [3, 17, H],
-            [4, 3, H], [4, 7, L], [4, 14, L], [4, 17, W],
-            [5, 3, L], [5, 5, W], [5, 10, H], [5, 14, L],
-            [6, 3, L], [6, 8, L], [6, 10, W], [6, 16, L],
-            [7, 1, W], [7, 8, L], [7, 12, H], [7, 16, L],
-            [8, 5, L], [8, 8, L], [8, 12, L], [8, 18, W],
+            [1, 4, L], [1, 9, D], [1, 12, H], [1, 15, L], [1, 18, D],
+            [2, 2, D], [2, 4, L], [2, 7, L], [2, 12, L], [2, 15, L],
+            [3, 7, L], [3, 10, D], [3, 12, L], [3, 17, H],
+            [4, 3, H], [4, 7, L], [4, 14, L], [4, 17, D],
+            [5, 3, L], [5, 5, D], [5, 10, H], [5, 14, L],
+            [6, 3, L], [6, 8, L], [6, 10, D], [6, 16, L],
+            [7, 1, D], [7, 8, L], [7, 12, H], [7, 16, L],
+            [8, 5, L], [8, 8, L], [8, 12, L], [8, 18, D],
             [9, 5, L], [9, 12, L]
           ],
           mario: { x: 64, y: 320 },
@@ -229,10 +276,10 @@
           rows: 6,
           tiles: [
             [0, 3, H], [0, 8, L],
-            [1, 3, W], [1, 5, L], [1, 8, L],
-            [2, 2, L], [2, 5, L], [2, 9, W],
+            [1, 3, D], [1, 5, L], [1, 8, L],
+            [2, 2, L], [2, 5, L], [2, 9, D],
             [3, 2, L], [3, 7, H], [3, 10, L],
-            [4, 4, W], [4, 7, L], [4, 10, L]
+            [4, 4, D], [4, 7, L], [4, 10, L]
           ],
           mario: { x: 32, y: 192 },
           spike: { x: 144, y: 64 }
@@ -250,6 +297,7 @@
       let paused = false;
       let stickBits = 0;
       let keyBits = 0;
+      let hammerBtnDown = false;
 
       function applyZoomMode() {
         if (!world) return;
@@ -271,7 +319,7 @@
       }
 
       function createStage() {
-        const cfg = STAGES[stageSelect.value] || STAGES.standard8;
+        const cfg = STAGES[stageSelect.value] || STAGES.hammerDemo;
         world = new GameWorld({
           cols: cfg.cols,
           rows: cfg.rows,
@@ -285,7 +333,7 @@
       }
 
       function currentBits() {
-        let b = stickBits | keyBits;
+        let b = stickBits | keyBits | (hammerBtnDown ? HAMMER : 0);
         if ((b & (LEFT | RIGHT)) === (LEFT | RIGHT)) {
           b &= ~(LEFT | RIGHT);
         }
@@ -305,6 +353,7 @@
         if (b & DOWN) out.push("D");
         if (b & LEFT) out.push("L");
         if (b & RIGHT) out.push("R");
+        if (b & HAMMER) out.push("H");
         return out.length ? out.join("") : "-";
       }
 
@@ -314,10 +363,11 @@
         const s = world.spike;
         const ai = world.spikeAI;
         const inp = currentBits();
+        const rem = world.countBreakables();
         hudEl.textContent =
-          "MAP:" + world.cols + "x" + world.rows + " F:" + world.f + " camY:" + Math.round(renderer.camY) + " IN:" + dirLabel(inp) + (paused ? " [PAUSE]" : "") + "\n" +
-          "Mario st:" + m.state + " X:" + m.x + " Y:" + m.y + " (" + m.row + "," + m.col + ") d:" + m.dir + (m.flag & 2 ? " [WALL]" : "") + "\n" +
-          "Spike st:" + s.state + " X:" + s.x + " Y:" + s.y + " (" + s.row + "," + s.col + ") d:" + s.dir + (s.flag & 2 ? " [WALL]" : "") + "\n" +
+          "MAP:" + world.cols + "x" + world.rows + " F:" + world.f + " TGT:" + rem + " camY:" + Math.round(renderer.camY) + " IN:" + dirLabel(inp) + (paused ? " [PAUSE]" : "") + "\n" +
+          "Mario st:" + m.state + " X:" + m.x + " Y:" + m.y + " (" + m.row + "," + m.col + ") f:" + (m.facing & 2 ? "L" : "R") + (m.flag & 2 ? " [DRUM]" : "") + "\n" +
+          "Spike st:" + s.state + " X:" + s.x + " Y:" + s.y + " (" + s.row + "," + s.col + ") f:" + (s.facing & 2 ? "L" : "R") + (s.flag & 2 ? " [DRUM]" : "") + "\n" +
           "AI    bits:" + dirLabel(s.bits) + "(" + s.bits + ") $39:" + ai.mem39 + " $3A:" + ai.timer;
       }
 
@@ -376,12 +426,41 @@
         if (e.pointerId === activePointerId) resetStick();
       });
 
+      // ハンマーボタン（マルチタッチ対応）
+      let hammerPointerId = null;
+      function setHammerPressed(on) {
+        hammerBtnDown = on;
+        hammerBtn.classList.toggle("pressed", on);
+      }
+
+      hammerBtn.addEventListener("pointerdown", function (e) {
+        e.preventDefault();
+        hammerPointerId = e.pointerId;
+        if (hammerBtn.setPointerCapture) {
+          try { hammerBtn.setPointerCapture(e.pointerId); } catch (_) {}
+        }
+        setHammerPressed(true);
+      });
+      hammerBtn.addEventListener("pointerup", function (e) {
+        if (e.pointerId === hammerPointerId) {
+          hammerPointerId = null;
+          setHammerPressed(false);
+        }
+      });
+      hammerBtn.addEventListener("pointercancel", function (e) {
+        if (e.pointerId === hammerPointerId) {
+          hammerPointerId = null;
+          setHammerPressed(false);
+        }
+      });
+
       // PC キーボード
       const KEY_MAP = {
         ArrowUp: UP, KeyW: UP,
         ArrowDown: DOWN, KeyS: DOWN,
         ArrowLeft: LEFT, KeyA: LEFT,
-        ArrowRight: RIGHT, KeyD: RIGHT
+        ArrowRight: RIGHT, KeyD: RIGHT,
+        Space: HAMMER, KeyZ: HAMMER, KeyJ: HAMMER
       };
       const pressedKeys = new Set();
 
@@ -412,6 +491,8 @@
         pressedKeys.clear();
         recomputeKeys();
         resetStick();
+        hammerPointerId = null;
+        setHammerPressed(false);
       });
 
       stageSelect.addEventListener("change", createStage);
