@@ -164,7 +164,8 @@
       if (isCrumblingLadderTile(t)) {
         const info = world.getCrumblingInfo(ladderRow, slot.col);
         const stage = info ? info.stage : (t & 0x07);
-        if (!slot.isMario || stage <= 2) {
+        const sameSide = (info ? info.byMario : true) === slot.isMario;
+        if (!sameSide || stage <= 2) {
           this.enterKnockdown(slot);
           return true;
         }
@@ -217,7 +218,8 @@
           if (isCrumblingLadderTile(t)) {
             const info = world.getCrumblingInfo(slot.row, slot.col);
             const stage = info ? info.stage : (t & 0x07);
-            if (!slot.isMario) {
+            const sameSide = (info ? info.byMario : true) === slot.isMario;
+            if (!sameSide) {
               if (stage >= 2) {
                 this.enterKnockdown(slot);
                 return true;
