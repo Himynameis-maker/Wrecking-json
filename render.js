@@ -2,6 +2,7 @@
   "use strict";
 
   const G = root.WreckGame || {};
+  const DOWN = G.DOWN || 4;
   const TILE = G.TILE || {
     EMPTY: 0x00,
     LADDER: 0x01,
@@ -793,8 +794,35 @@
       }
     }
 
+    getLadderVisualOffsetY(slot) {
+      if (slot.state === 3) {
+        if (slot.kind === "enter_top") {
+          const limit = slot.isMario ? 12 : 9;
+          return Math.min(10, Math.max(2, Math.round((slot.n / limit) * 10)));
+        }
+        if (slot.kind === "arrive_top") {
+          const remain = Math.max(0, 12 - slot.n);
+          return Math.min(10, Math.round((remain / 12) * 10));
+        }
+        return 0;
+      }
+      if (slot.state === 6) {
+        if (slot.kind === "enter_top_cont") {
+          return Math.min(10, Math.max(2, Math.round((slot.n / 16) * 10)));
+        }
+        if (slot.kind === "cont" && (slot.dir & DOWN)) {
+          return Math.min(10, Math.max(2, Math.round((slot.n / 12) * 10)));
+        }
+        return 0;
+      }
+      if (slot.state === 2 && slot.prom === 31 && slot.y === slot.topY) {
+        return 10;
+      }
+      return 0;
+    }
+
     drawActor(slot, sprites, worldWidth, world) {
-      const drawY = slot.y - 26;
+      const drawY = slot.y - 26 + this.getLadderVisualOffsetY(slot);
       this.drawActorAt(slot, sprites, slot.x, drawY, world);
       if (slot.x > worldWidth - 16) {
         this.drawActorAt(slot, sprites, slot.x - worldWidth, drawY, world);
