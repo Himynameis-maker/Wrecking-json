@@ -152,6 +152,7 @@
   <div class="topbar">
     <div class="btn-row">
       <select id="stageSelect" aria-label="ステージ選択">
+        <option value="pillarDemo">鉄柱＆落下テスト（16×8）</option>
         <option value="hammerDemo">ハンマー＆破壊テスト（16×8）</option>
         <option value="standard8">標準16×8（穴・ドラム缶・連続はしご）</option>
         <option value="wide10">拡大20×10（マップ拡大テスト）</option>
@@ -217,8 +218,27 @@
       const W3 = TILE.WALL_3;
       const B = TILE.BOMB;
       const BL = TILE.BREAK_LADDER;
+      const P = TILE.PILLAR;
 
       const STAGES = {
+        pillarDemo: {
+          cols: 16,
+          rows: 8,
+          tiles: [
+            // 最上段鉄柱（落ちない）＆上段テスト：壁・ドラム缶・2段連続壊せるはしご
+            [0, 1, P], [0, 10, L],
+            [1, 3, W1], [1, 5, D], [1, 7, BL], [1, 10, L],
+            [2, 3, P], [2, 5, P], [2, 7, BL], [2, 10, L],
+            [3, 2, L], [3, 7, P], [3, 10, L],
+            [4, 2, L], [4, 10, L],
+            // 下段（row 6）：col4=空床落とし, col6=ドラム缶落とし(閉じ込め), col8=爆弾落とし, col12=2回壁落とし
+            [5, 2, L], [5, 6, D], [5, 8, B], [5, 10, L], [5, 12, W2],
+            [6, 2, L], [6, 4, P], [6, 6, P], [6, 8, P], [6, 10, L], [6, 12, P],
+            [7, 0, D], [7, 15, D]
+          ],
+          mario: { x: 48, y: 224 },
+          spike: { x: 112, y: 224 }
+        },
         hammerDemo: {
           cols: 16,
           rows: 8,
@@ -319,7 +339,7 @@
       }
 
       function createStage() {
-        const cfg = STAGES[stageSelect.value] || STAGES.hammerDemo;
+        const cfg = STAGES[stageSelect.value] || STAGES.pillarDemo;
         world = new GameWorld({
           cols: cfg.cols,
           rows: cfg.rows,
@@ -357,6 +377,12 @@
         return out.length ? out.join("") : "-";
       }
 
+      function actorTag(a) {
+        if (a.state === 15 || a.state === 16) return " [TRAPPED!]";
+        if (a.flag & 2) return " [DRUM]";
+        return "";
+      }
+
       function renderNow() {
         renderer.draw(world);
         const m = world.mario;
@@ -366,8 +392,8 @@
         const rem = world.countBreakables();
         hudEl.textContent =
           "MAP:" + world.cols + "x" + world.rows + " F:" + world.f + " TGT:" + rem + " camY:" + Math.round(renderer.camY) + " IN:" + dirLabel(inp) + (paused ? " [PAUSE]" : "") + "\n" +
-          "Mario st:" + m.state + " X:" + m.x + " Y:" + m.y + " (" + m.row + "," + m.col + ") f:" + (m.facing & 2 ? "L" : "R") + (m.flag & 2 ? " [DRUM]" : "") + "\n" +
-          "Spike st:" + s.state + " X:" + s.x + " Y:" + s.y + " (" + s.row + "," + s.col + ") f:" + (s.facing & 2 ? "L" : "R") + (s.flag & 2 ? " [DRUM]" : "") + "\n" +
+          "Mario st:" + m.state + " X:" + m.x + " Y:" + m.y + " (" + m.row + "," + m.col + ") f:" + (m.facing & 2 ? "L" : "R") + actorTag(m) + "\n" +
+          "Spike st:" + s.state + " X:" + s.x + " Y:" + s.y + " (" + s.row + "," + s.col + ") f:" + (s.facing & 2 ? "L" : "R") + actorTag(s) + "\n" +
           "AI    bits:" + dirLabel(s.bits) + "(" + s.bits + ") $39:" + ai.mem39 + " $3A:" + ai.timer;
       }
 

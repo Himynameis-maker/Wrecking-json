@@ -9,14 +9,18 @@
     WALL: 0x08,
     DRUM: 0x08,
     HOLE: 0x09,
+    HOLE_FALLING: 0x0c,
+    DRUM_FALLING: 0x0d,
     WALL_1: 0xc1,
     WALL_2: 0x92,
     WALL_3: 0xa3,
     BOMB: 0xb1,
-    BREAK_LADDER: 0xd1
+    BREAK_LADDER: 0xd1,
+    PILLAR: 0xf1
   };
   const isHoleTile = G.isHoleTile || (t => t >= 0x09 && t <= 0x0b);
   const isCrumblingLadderTile = G.isCrumblingLadderTile || (t => t >= 0x51 && t <= 0x55);
+  const isPillarCrumblingTile = G.isPillarCrumblingTile || (t => t >= 0x71 && t <= 0x75);
   const isSameLadderType = G.isSameLadderType || ((a, b) =>
     (a === TILE.LADDER && b === TILE.LADDER) ||
     (a === TILE.BREAK_LADDER && b === TILE.BREAK_LADDER));
@@ -494,6 +498,43 @@
       }
     }
 
+    drawPillar(ctx, x, yTop) {
+      // 上下フランジ＋中央I字ビーム鉄柱（背景扱いで素通り可）
+      ctx.fillStyle = "#526074";
+      ctx.fillRect(x + 2, yTop, 12, 4);
+      ctx.fillRect(x + 2, yTop + 28, 12, 4);
+      ctx.fillStyle = "#98acc4";
+      ctx.fillRect(x + 2, yTop + 1, 12, 1);
+      ctx.fillRect(x + 2, yTop + 29, 12, 1);
+
+      ctx.fillStyle = "#485468";
+      ctx.fillRect(x + 5, yTop + 4, 6, 24);
+      ctx.fillStyle = "#7a8da6";
+      ctx.fillRect(x + 6, yTop + 4, 4, 24);
+      ctx.fillStyle = "#b4c8e0";
+      ctx.fillRect(x + 7, yTop + 4, 1, 24);
+
+      // リベット・継手
+      ctx.fillStyle = "#262e3c";
+      ctx.fillRect(x + 3, yTop + 1, 2, 2);
+      ctx.fillRect(x + 11, yTop + 1, 2, 2);
+      ctx.fillRect(x + 3, yTop + 29, 2, 2);
+      ctx.fillRect(x + 11, yTop + 29, 2, 2);
+      ctx.fillRect(x + 5, yTop + 15, 6, 2);
+    }
+
+    drawPillarCrumbling(ctx, x, yTop, stage, frame) {
+      const blink = ((frame >> 1) & 1) === 0;
+      const h = Math.max(4, stage * 5);
+      const offsetY = 32 - h;
+      ctx.fillStyle = stage <= 2 && blink ? "#d8e6f8" : "#627288";
+      ctx.fillRect(x + 5, yTop + offsetY, 6, h);
+      ctx.fillStyle = blink ? "#ffffff" : "#98acc4";
+      ctx.fillRect(x + 6, yTop + offsetY, 2, Math.max(2, h - 2));
+      ctx.fillStyle = "#404c5c";
+      ctx.fillRect(x + 2, yTop + 28, 12, 4);
+    }
+
     drawBreakableWall(ctx, x, yTop, tile) {
       const hp = tile & 0x07;
       const group = tile & 0x70; // 0x40=1回壁, 0x10=2回壁, 0x20=3回壁
@@ -596,6 +637,68 @@
       ctx.fillRect(x + 7, yTop + 21, 3, 4);
     }
 
+    drawTileAt(ctx, x, yTop, val, world) {
+      if (val === TILE.EMPTY || isHoleTile(val) || val === TILE.HOLE_FALLING || val === TILE.DRUM_FALLING) {
+        return;
+      }
+
+      if (val === TILE.LADDER) {
+        ctx.fillStyle = "#d89040";
+        ctx.fillRect(x + 2, yTop, 2, 32);
+        ctx.fillRect(x + 12, yTop, 2, 32);
+        ctx.fillStyle = "#f8c068";
+        for (let ry = 3; ry < 32; ry += 6) {
+          ctx.fillRect(x + 2, yTop + ry, 12, 2);
+        }
+      } else if (val === TILE.BREAK_LADDER) {
+        ctx.fillStyle = "#b84468";
+        ctx.fillRect(x + 2, yTop, 2, 32);
+        ctx.fillRect(x + 12, yTop, 2, 32);
+        ctx.fillStyle = "#ff88a8";
+        for (let ry = 3; ry < 32; ry += 6) {
+          ctx.fillRect(x + 2, yTop + ry, 5, 2);
+          ctx.fillRect(x + 9, yTop + ry, 5, 2);
+        }
+      } else if (isCrumblingLadderTile(val)) {
+        const info = world.getCrumblingInfo ? world.getCrumblingInfo(Math.floor(yTop / 32), Math.floor(x / 16)) : null;
+        const stage = info ? info.stage : (val & 0x07);
+        this.drawCrumblingLadder(ctx, x, yTop, stage, world.f);
+      } else if (val === TILE.PILLAR) {
+        this.drawPillar(ctx, x, yTop);
+      } else if (isPillarCrumblingTile(val)) {
+        const stage = val & 0x07;
+        this.drawPillarCrumbling(ctx, x, yTop, stage, world.f);
+      } else if (val === TILE.DRUM) {
+        this.drawDrum(ctx, x, yTop);
+      } else if (val === TILE.BOMB) {
+        this.drawBomb(ctx, x, yTop, world.f);
+      } else if ((val & 0x80) !== 0) {
+        this.drawBreakableWall(ctx, x, yTop, val);
+      }
+    }
+
+    drawFallingPillars(ctx, world) {
+      if (!world.fallingPillars || world.fallingPillars.length === 0) return;
+      for (const fp of world.fallingPillars) {
+        const dropOffsetY = (fp.stage - 1) * 8;
+        const x = fp.col * 16;
+        const yTop = fp.row * 32 + dropOffsetY;
+        const floorY = yTop + 32;
+
+        // 滞空・落下する「白い床板」パーツ（原作の白い落下床表現）
+        ctx.fillStyle = "#b8c8e8";
+        ctx.fillRect(x, floorY, 16, 6);
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(x, floorY, 16, 2);
+        ctx.fillStyle = "#788cb8";
+        ctx.fillRect(x + 2, floorY + 3, 12, 2);
+
+        if (!fp.isFloorOnly) {
+          this.drawTileAt(ctx, x, yTop, fp.origAboveTile, world);
+        }
+      }
+    }
+
     draw(world) {
       this.ensureCanvasSize(world);
       this.updateCamera(world);
@@ -616,7 +719,7 @@
       ctx.fillRect(0, 0, 1, world.rows * 32);
       ctx.fillRect(w - 1, 0, 1, world.rows * 32);
 
-      // 床（穴および同種連続はしごの中間以外は青い鉄骨を描画、最下段は常に足場あり）
+      // 床（穴・落下開始穴 $0C および同種連続はしごの中間以外は青い鉄骨を描画、最下段は常に足場あり）
       for (let row = 0; row < world.rows; row++) {
         const floorY = (row + 1) * 32;
         const isBottomRow = row === world.rows - 1;
@@ -630,8 +733,8 @@
           );
           const x = col * 16;
 
-          if (!isBottomRow && (isHoleTile(tile) || isContLad)) {
-            if (isHoleTile(tile)) {
+          if (!isBottomRow && (isHoleTile(tile) || tile === TILE.HOLE_FALLING || isContLad)) {
+            if (isHoleTile(tile) || tile === TILE.HOLE_FALLING) {
               ctx.fillStyle = "#0d1222";
               ctx.fillRect(x, floorY, 16, 6);
             }
@@ -651,40 +754,12 @@
         const yTop = row * 32;
         for (let col = 0; col < world.cols; col++) {
           const val = world.getTile(row, col);
-          if (val === TILE.EMPTY || isHoleTile(val)) continue;
-          const x = col * 16;
-
-          if (val === TILE.LADDER) {
-            ctx.fillStyle = "#d89040";
-            ctx.fillRect(x + 2, yTop, 2, 32);
-            ctx.fillRect(x + 12, yTop, 2, 32);
-            ctx.fillStyle = "#f8c068";
-            for (let ry = 3; ry < 32; ry += 6) {
-              ctx.fillRect(x + 2, yTop + ry, 12, 2);
-            }
-          } else if (val === TILE.BREAK_LADDER) {
-            // 壊せるはしご（ピンク系＋横棒にヒビ切れ目）
-            ctx.fillStyle = "#b84468";
-            ctx.fillRect(x + 2, yTop, 2, 32);
-            ctx.fillRect(x + 12, yTop, 2, 32);
-            ctx.fillStyle = "#ff88a8";
-            for (let ry = 3; ry < 32; ry += 6) {
-              ctx.fillRect(x + 2, yTop + ry, 5, 2);
-              ctx.fillRect(x + 9, yTop + ry, 5, 2);
-            }
-          } else if (isCrumblingLadderTile(val)) {
-            const info = world.getCrumblingInfo ? world.getCrumblingInfo(row, col) : null;
-            const stage = info ? info.stage : (val & 0x07);
-            this.drawCrumblingLadder(ctx, x, yTop, stage, world.f);
-          } else if (val === TILE.DRUM) {
-            this.drawDrum(ctx, x, yTop);
-          } else if (val === TILE.BOMB) {
-            this.drawBomb(ctx, x, yTop, world.f);
-          } else if ((val & 0x80) !== 0) {
-            this.drawBreakableWall(ctx, x, yTop, val);
-          }
+          this.drawTileAt(ctx, col * 16, yTop, val, world);
         }
       }
+
+      // 鉄柱の滞空・落下オブジェクト＋白い床板
+      this.drawFallingPillars(ctx, world);
 
       // 破壊破片エフェクト
       if (world.breakEffects) {
@@ -692,7 +767,13 @@
           const t = ef.maxTimer - ef.timer;
           const cx = ef.col * 16 + 8;
           const cy = ef.row * 32 + 16;
-          ctx.fillStyle = ef.tile === TILE.BREAK_LADDER ? "#ff88a8" : "#d07850";
+          if (ef.tile === TILE.BREAK_LADDER) {
+            ctx.fillStyle = "#ff88a8";
+          } else if (ef.tile === TILE.PILLAR) {
+            ctx.fillStyle = "#98acc4";
+          } else {
+            ctx.fillStyle = "#d07850";
+          }
           ctx.fillRect(cx - 4 - t * 0.5, cy - 6 + t * 0.8, 3, 3);
           ctx.fillRect(cx + 2 + t * 0.5, cy - 4 + t * 0.9, 3, 3);
           ctx.fillRect(cx - 5 - t * 0.3, cy + 2 + t * 1.1, 3, 3);
@@ -745,6 +826,9 @@
       const faceVal = slot.facing || slot.dir;
       const facing = (faceVal & 2) ? "L" : "R";
 
+      if (slot.state === 15 || slot.state === 16) {
+        return "idle_" + facing;
+      }
       if (slot.state === 10) {
         const idx = ((world ? world.f >> 2 : 0) & 1) ? "walk1" : "walk2";
         return idx + "_" + facing;
@@ -812,7 +896,6 @@
       const gripColor = "#c8843c";
 
       if (phase === 0) {
-        // 後ろ上へ振りかぶる
         const hx = isLeft ? baseX + 12 : baseX - 5;
         const hy = baseY + 1;
         ctx.fillStyle = gripColor;
@@ -822,7 +905,6 @@
         ctx.fillStyle = "#b0c0d4";
         ctx.fillRect(hx + 1, hy + 1, 7, 1);
       } else if (phase === 1) {
-        // 頭上に高く構える
         const hx = isLeft ? baseX + 2 : baseX + 5;
         const hy = baseY - 7;
         ctx.fillStyle = gripColor;
@@ -832,7 +914,6 @@
         ctx.fillStyle = "#b0c0d4";
         ctx.fillRect(hx + 1, hy + 1, 7, 1);
       } else if (phase === 2) {
-        // 前下へ振り下ろす
         const hx = isLeft ? baseX - 7 : baseX + 14;
         const hy = baseY + 11;
         ctx.fillStyle = gripColor;
@@ -842,7 +923,6 @@
         ctx.fillStyle = "#b0c0d4";
         ctx.fillRect(hx + 1, hy + 5, 7, 1);
 
-        // 叩いた瞬間の衝撃線（hitFから4F間）
         if (t <= hitF + 4 && t < total) {
           ctx.fillStyle = "#fff480";
           const sx = isLeft ? baseX - 9 : baseX + 24;
@@ -850,7 +930,6 @@
           ctx.fillRect(sx, baseY + 17, 2, 2);
         }
       } else {
-        // 振り終わり戻り硬直（親方終盤 $4D コマ相当）
         const hx = isLeft ? baseX - 2 : baseX + 10;
         const hy = baseY + 14;
         ctx.fillStyle = gripColor;
@@ -866,6 +945,23 @@
       const img = sprites[this.pickFrame(slot, world)];
       if (!img) return;
       const ctx = this.ctx;
+
+      if (slot.state === 15 || slot.state === 16) {
+        // ドラム缶閉じ込め状態: 天板から頭・手だけ覗かせてジタバタ点滅
+        const f = world ? world.f : 0;
+        const phase = (f >> 2) & 1;
+        const bobY = slot.state === 15 ? 4 : (phase ? -3 : -2);
+        ctx.drawImage(img, 0, 0, 16, 9, baseX, drawY + bobY, 16, 9);
+        const handColor = slot.isMario ? "#f4be8c" : "#e6e6e6";
+        ctx.fillStyle = handColor;
+        ctx.fillRect(baseX + 1, drawY + bobY + (phase ? 5 : 7), 2, 2);
+        ctx.fillRect(baseX + 13, drawY + bobY + (phase ? 7 : 5), 2, 2);
+        if (slot.state === 16) {
+          ctx.fillStyle = phase ? "#ffec48" : "#ffffff";
+          ctx.fillRect(baseX + 7, drawY - 6, 2, 2);
+        }
+        return;
+      }
 
       if (slot.state === 10) {
         ctx.save();

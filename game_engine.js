@@ -10,22 +10,34 @@
   const TILE = {
     EMPTY: 0x00,
     LADDER: 0x01,
-    WALL: 0x08,          // 互換エイリアス（ドラム缶）
-    DRUM: 0x08,          // ドラム缶（横通行不可・上乗れる・壊せない）
+    WALL: 0x08,            // 互換エイリアス（ドラム缶）
+    DRUM: 0x08,            // ドラム缶（横通行不可・上乗れる・壊せない）
     HOLE: 0x09,
-    CRUMBLING_1: 0x51,   // 壊れかけはしご（残1）
-    CRUMBLING_2: 0x52,   // 壊れかけはしご（残2）
-    CRUMBLING_3: 0x53,   // 壊れかけはしご（残3）
-    CRUMBLING_4: 0x54,   // 壊れかけはしご（残4）
-    WALL_1: 0xc1,        // 1回壊せる壁
-    WALL_2: 0x92,        // 2回壊せる壁
-    WALL_3: 0xa3,        // 3回壊せる壁
-    BOMB: 0xb1,          // 爆弾
-    BREAK_LADDER: 0xd1   // 壊せるはしご
+    HOLE_CRUMBLED: 0x0a,   // 壊せるはしご崩落穴
+    HOLE_PILLAR_LAD: 0x0b, // 連続はしご落下後の穴
+    HOLE_FALLING: 0x0c,    // 鉄柱で上段が落ち始めた瞬間の滞空穴（0〜41F）
+    DRUM_FALLING: 0x0d,    // ドラム缶落下中の下段（30〜41F）
+    CRUMBLING_1: 0x51,     // 壊れかけはしご（残1）
+    CRUMBLING_2: 0x52,     // 壊れかけはしご（残2）
+    CRUMBLING_3: 0x53,     // 壊れかけはしご（残3）
+    CRUMBLING_4: 0x54,     // 壊れかけはしご（残4）
+    WALL_1: 0xc1,          // 1回壊せる壁
+    WALL_2: 0x92,          // 2回壊せる壁
+    WALL_3: 0xa3,          // 3回壊せる壁
+    BOMB: 0xb1,            // 爆弾
+    BREAK_LADDER: 0xd1,    // 壊せるはしご
+    PILLAR: 0xf1           // 支柱（鉄柱）
   };
 
   function isBreakableTile(t) {
     return (t & 0x80) !== 0;
+  }
+
+  function isClearTargetTile(t) {
+    if ((t & 0x80) === 0) return false;
+    if (t === TILE.BOMB || t === TILE.PILLAR) return false;
+    if ((t & 0xf0) === 0xe0) return false;
+    return true;
   }
 
   function isLadderTile(t) {
@@ -34,6 +46,10 @@
 
   function isCrumblingLadderTile(t) {
     return t >= 0x51 && t <= 0x55;
+  }
+
+  function isPillarCrumblingTile(t) {
+    return t >= 0x71 && t <= 0x75;
   }
 
   function isSameLadderType(t1, t2) {
@@ -45,8 +61,29 @@
     return t >= 0x09 && t <= 0x0b;
   }
 
+  function isFallHoleTile(t) {
+    return t >= 0x09 && t <= 0x0c;
+  }
+
   function isSolidDrum(t) {
     return t === TILE.DRUM;
+  }
+
+  function getPillarFallPayload(aboveTile) {
+    if (aboveTile === TILE.EMPTY) return TILE.EMPTY;
+    if (aboveTile === TILE.LADDER || aboveTile === TILE.BREAK_LADDER || aboveTile === TILE.DRUM) {
+      return aboveTile;
+    }
+    if (aboveTile === TILE.BOMB ||
+        aboveTile === TILE.WALL_1 ||
+        aboveTile === TILE.WALL_2 || aboveTile === 0x91 ||
+        aboveTile === TILE.WALL_3 || aboveTile === 0xa2 || aboveTile === 0xa1) {
+      return aboveTile;
+    }
+    if (aboveTile >= 0x10 && aboveTile <= 0x5f) {
+      return TILE.EMPTY;
+    }
+    return null;
   }
 
   function getHammerTiming(slot) {
@@ -158,6 +195,42 @@
       slot.stunTimer = 0;
     }
 
+    // $C8BB 相当: 落下中ドラム缶 ($0D) による閉じ込め捕獲＆隣セルはみ出し押し戻し
+    checkDrumTrap(slot, world) {
+      if (slot.state !== 0 && slot.state !== 1 && slot.state !== 2 && slot.state !== 4) {
+        return false;
+      }
+      const curTile = world.getTile(slot.row, slot.col);
+      if (curTile === TILE.DRUM_FALLING) {
+        if (slot.state === 2) {
+          slot.prom = 0x10;
+          return false;
+        }
+        slot.state = 15;
+        slot.n = 0;
+        slot.kind = null;
+        slot.prom = 0;
+        slot.aux = 0;
+        slot.auxRow = 0;
+        slot.hammerTimer = 0;
+        slot.hammerHitDone = false;
+        slot.stunTimer = 0;
+        this.snapX(slot, world);
+        this.snapY(slot);
+        this.updateCR(slot, world);
+        return true;
+      }
+      if ((slot.x & 0x0f) !== 0) {
+        const sideCol = world.wrapCol(slot.col + ((slot.x & 0x0f) < 8 ? 1 : -1));
+        if (world.getTile(slot.row, sideCol) === TILE.DRUM_FALLING) {
+          this.snapX(slot, world);
+          this.updateCR(slot, world);
+          return true;
+        }
+      }
+      return false;
+    }
+
     checkLadderHoldHazard(slot, world, ladderRow) {
       const t = world.getTile(ladderRow, slot.col);
       if (isLadderTile(t)) return false;
@@ -176,7 +249,9 @@
     }
 
     checkHazardHit(slot, world) {
-      if (slot.state === 10 || slot.state === 11) return false;
+      if (slot.state === 10 || slot.state === 11 || slot.state === 15 || slot.state === 16) {
+        return false;
+      }
 
       if (world.explosions.length > 0) {
         const isHoldingLadder = slot.state === 2 ||
@@ -275,7 +350,7 @@
       if (slot.flag & 2) {
         if (isSolidDrum(world.getTile(slot.row + 1, slot.col))) return false;
       } else {
-        if (!isHoleTile(world.getTile(slot.row, slot.col))) return false;
+        if (!isFallHoleTile(world.getTile(slot.row, slot.col))) return false;
       }
       if (((slot.x + 3) & 0x0f) >= 6) return false;
 
@@ -449,6 +524,19 @@
     step(slot, world) {
       this.updateCR(slot, world);
 
+      // State 15 ($0F): 落下中ドラム缶に捕獲され待機 → 着地($08)で State 16 へ
+      if (slot.state === 15) {
+        if (world.getTile(slot.row, slot.col) === TILE.DRUM) {
+          slot.state = 16;
+        }
+        return;
+      }
+
+      // State 16 ($10): ドラム缶閉じ込めジタバタ状態（行動不能）
+      if (slot.state === 16) {
+        return;
+      }
+
       if (slot.state === 10) {
         const dy = slot.n < KNOCKDOWN_DY.length ? KNOCKDOWN_DY[slot.n] : 2;
         slot.n += 1;
@@ -498,6 +586,8 @@
       }
 
       if (this.checkHazardHit(slot, world)) return;
+      if (this.checkDrumTrap(slot, world)) return;
+
       const b = slot.bits;
 
       if (slot.state === 0) {
@@ -590,7 +680,7 @@
           this.snapY(slot);
           this.updateCR(slot, world);
           const t = world.getTile(slot.row, slot.col);
-          const isHole = isHoleTile(t) && (slot.row < world.rows - 1);
+          const isHole = isFallHoleTile(t) && (slot.row < world.rows - 1);
           const isContLad = this.isContinuousLadderSegment(slot.row, slot.col, world);
           if (!isHole && !isContLad) {
             slot.state = 0;
@@ -711,6 +801,10 @@
     update(world) {
       const sp = world.spike;
       const ma = world.mario;
+      if (sp.state === 15 || sp.state === 16) {
+        sp.bits = 0;
+        return;
+      }
 
       if (ma.row === sp.row && sp.y === ma.y) {
         let v = (this.timer - 1) & 0xff;
@@ -827,6 +921,8 @@
       this.explosions = [];
       this.breakEffects = [];
       this.crumblingLadders = new Map();
+      this.pillarBreaks = new Map();
+      this.fallingPillars = [];
       this.spikeAggressive = !!config.spikeAggressive;
 
       const stepper = new ActorStepper();
@@ -881,6 +977,10 @@
       return info ? info.hasBelowSame : false;
     }
 
+    getPillarBreakInfo(row, col) {
+      return this.pillarBreaks.get(this.cellKey(row, col)) || null;
+    }
+
     loadTiles(src) {
       if (Array.isArray(src)) {
         for (const item of src) {
@@ -917,7 +1017,12 @@
     countBreakables() {
       let count = 0;
       for (let i = 0; i < this.tiles.length; i++) {
-        if (isBreakableTile(this.tiles[i])) {
+        if (isClearTargetTile(this.tiles[i])) {
+          count += 1;
+        }
+      }
+      for (let i = 0; i < this.fallingPillars.length; i++) {
+        if (isClearTargetTile(this.fallingPillars[i].payloadTile)) {
           count += 1;
         }
       }
@@ -974,7 +1079,7 @@
           e.timer = 8;
           if (e.stage <= 0) {
             this.crumblingLadders.delete(this.cellKey(e.row, e.col));
-            this.setTile(e.row, e.col, e.hasBelowSame ? TILE.HOLE : TILE.EMPTY);
+            this.setTile(e.row, e.col, e.hasBelowSame ? TILE.HOLE_CRUMBLED : TILE.EMPTY);
             this.breakEffects.push({ row: e.row, col: e.col, tile: TILE.BREAK_LADDER, timer: 16, maxTimer: 16 });
           } else {
             this.setTile(e.row, e.col, 0x50 + e.stage);
@@ -984,6 +1089,92 @@
 
       for (const s of toSpread) {
         this.startCrumblingLadder(s.row, s.col, s.byMario, s.up, s.down);
+      }
+    }
+
+    triggerPillar(row, col) {
+      if (row < 0 || row >= this.rows) return false;
+      const c = this.wrapCol(col);
+
+      // 支柱自身の崩壊開始 ($75 -> $74 -> $73 -> $72 -> $71 -> $00, 1+8*4=33F)
+      this.setTile(row, c, 0x75);
+      this.pillarBreaks.set(this.cellKey(row, c), {
+        row,
+        col: c,
+        stage: 5,
+        timer: 1
+      });
+
+      if (row >= 1 && this.fallingPillars.length < 12) {
+        const aboveRow = row - 1;
+        const aboveTile = this.getTile(aboveRow, c);
+        const payload = getPillarFallPayload(aboveTile);
+        if (payload !== null) {
+          this.crumblingLadders.delete(this.cellKey(aboveRow, c));
+          const isContLadder = (aboveTile === TILE.LADDER || aboveTile === TILE.BREAK_LADDER) &&
+            aboveRow >= 1 &&
+            isSameLadderType(aboveTile, this.getTile(aboveRow - 1, c));
+
+          // 0F目から1行上は即座に $0C (穴落下判定) になり、オブジェクトは 30F 滞空する
+          this.setTile(aboveRow, c, TILE.HOLE_FALLING);
+          this.fallingPillars.push({
+            row: aboveRow,
+            targetRow: row,
+            col: c,
+            payloadTile: payload,
+            origAboveTile: aboveTile,
+            isDrum: aboveTile === TILE.DRUM,
+            isFloorOnly: payload === TILE.EMPTY,
+            aboveDoneHole: isContLadder ? TILE.HOLE_PILLAR_LAD : TILE.HOLE,
+            stage: 1,
+            timer: 30
+          });
+        }
+      }
+      return true;
+    }
+
+    updatePillarBreakTiles() {
+      if (this.pillarBreaks.size === 0) return;
+      const entries = Array.from(this.pillarBreaks.values());
+      for (const e of entries) {
+        e.timer -= 1;
+        if (e.timer <= 0) {
+          e.stage -= 1;
+          if (e.stage <= 0) {
+            this.pillarBreaks.delete(this.cellKey(e.row, e.col));
+            this.setTile(e.row, e.col, TILE.EMPTY);
+            this.breakEffects.push({ row: e.row, col: e.col, tile: TILE.PILLAR, timer: 14, maxTimer: 14 });
+          } else {
+            e.timer = 8;
+            this.setTile(e.row, e.col, 0x70 + e.stage);
+          }
+        }
+      }
+    }
+
+    updateFallingPillars() {
+      if (this.fallingPillars.length === 0) return;
+      for (let i = this.fallingPillars.length - 1; i >= 0; i--) {
+        const fp = this.fallingPillars[i];
+        fp.timer -= 1;
+        if (fp.timer > 0) continue;
+
+        fp.timer = 4;
+        if (fp.stage === 1 && fp.isDrum) {
+          // 30F目: ドラム缶落下中は下の鉄柱マスを $0D へ (閉じ込め捕獲開始)
+          this.pillarBreaks.delete(this.cellKey(fp.targetRow, fp.col));
+          this.setTile(fp.targetRow, fp.col, TILE.DRUM_FALLING);
+        }
+
+        fp.stage += 1;
+        if (fp.stage >= 5) {
+          // 42F目 (30 + 4*3): 着地完了
+          this.fallingPillars.splice(i, 1);
+          this.pillarBreaks.delete(this.cellKey(fp.targetRow, fp.col));
+          this.setTile(fp.targetRow, fp.col, fp.payloadTile);
+          this.setTile(fp.row, fp.col, fp.aboveDoneHole);
+        }
       }
     }
 
@@ -1000,6 +1191,10 @@
 
       if (tile === TILE.BREAK_LADDER) {
         return this.startCrumblingLadder(row, c, byMario, true, true);
+      }
+
+      if (tile === TILE.PILLAR) {
+        return this.triggerPillar(row, c);
       }
 
       const hp = tile & 0x07;
@@ -1030,6 +1225,8 @@
 
     updateEffectsAndWaves() {
       this.updateCrumblingLadders();
+      this.updatePillarBreakTiles();
+      this.updateFallingPillars();
 
       for (let i = this.explosions.length - 1; i >= 0; i--) {
         const ex = this.explosions[i];
@@ -1094,7 +1291,9 @@
       const sp = this.spike;
       const ma = this.mario;
       sp.bits &= ~HAMMER;
-      if (sp.state === 4 || sp.state === 10 || sp.state === 11) return;
+      if (sp.state === 4 || sp.state === 10 || sp.state === 11 || sp.state === 15 || sp.state === 16) {
+        return;
+      }
 
       const tile = this.getTile(sp.row, sp.col);
       if (tile === TILE.BOMB || !isBreakableTile(tile)) return;
@@ -1137,10 +1336,13 @@
     TILE,
     getHammerTiming,
     isBreakableTile,
+    isClearTargetTile,
     isLadderTile,
     isCrumblingLadderTile,
+    isPillarCrumblingTile,
     isSameLadderType,
     isHoleTile,
+    isFallHoleTile,
     isSolidDrum,
     Actor,
     ActorStepper,
