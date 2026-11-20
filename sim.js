@@ -8,8 +8,8 @@
 
   const DEFAULT_LADDERS = { 0x515: 1 };
   const SUPPORTED_ADDRS = new Set([
-    0x300, 0x308, 0x309, 0x30d, 0x30e, 0x30f, 0x312, 0x313, 0x315, 0x316, 0x317,
-    0x320, 0x328, 0x329, 0x32d, 0x32e, 0x32f, 0x332, 0x333, 0x335, 0x336, 0x337,
+    0x300, 0x304, 0x308, 0x309, 0x30d, 0x30e, 0x30f, 0x312, 0x313, 0x314, 0x315, 0x316, 0x317,
+    0x320, 0x324, 0x328, 0x329, 0x32d, 0x32e, 0x32f, 0x332, 0x333, 0x334, 0x335, 0x336, 0x337,
     0x339, 0x33a
   ]);
 
@@ -34,6 +34,7 @@
       this.base = base;
       this.stepper = stepper;
       this.state = 0;       // $0300/$0320
+      this.aux = 0;         // $0304/$0324 (State 8カウンタ / State 9目標cr)
       this.bits = 0;        // $0308/$0328
       this.x = 80;          // $0309/$0329
       this.y = 64;          // $0315/$0335
@@ -107,6 +108,98 @@
       slot.prom = (slot.base === 0x300) ? 0 : 0x12;
       slot.top_y = slot.y;
       slot.state = 5;
+      return true;
+    }
+
+    // sub_C337 ($C337〜$C4C7): 連続はしご・穴等への横飛び遷移 (State 8 / State 9)
+    trySideTransition(slot, b, world) {
+      this.updateCR(slot);
+      const horiz = b & (LEFT | RIGHT);
+      if (horiz === 0) return false;
+
+      const curCR = slot.cr;
+      if (slot.state !== 1) {
+        const curTile = world.getTile(0x500 + curCR);
+        let checkTile = curTile;
+        if (curTile !== 0xd1 && curTile !== 1) {
+          if (curTile < 9 || curTile >= 0x0c) return false;
+          checkTile = 0xd1;
+        }
+        if (curCR >= 0x70) return false;
+        const belowTile = world.getTile(0x510 + curCR);
+        if (belowTile !== checkTile) {
+          if ((curTile & 0x0e) === 0) return false;
+          if (belowTile !== 1 && belowTile !== 0x0b) return false;
+        }
+      }
+
+      const nextCR = (horiz === RIGHT) ? ((curCR + 1) & 0xff) : ((curCR - 1) & 0xff);
+      const nextCol = nextCR & 0x0f;
+      if (nextCol === 0 || nextCol === 0x0f) return false;
+
+      const nextTile = world.getTile(0x500 + nextCR);
+      let goDirectlyToApply = false;
+      if (slot.state !== 1 && nextTile >= 9 && nextTile < 0x0c) {
+        if ((slot.y & 0x1f) >= 0x0b && world.getTile(0x510 + nextCR) === 8) {
+          if (slot.prom < 0x0f) return false;
+          slot.y = (slot.y & 0xe0) | 0x0b;
+        }
+        if (nextCR < 0x70) {
+          const nextBelow = world.getTile(0x510 + nextCR);
+          if ((nextBelow === 0xd1 || nextBelow === 1) && (slot.y & 0x0f) !== 0 && slot.prom < 0x1f) {
+            goDirectlyToApply = true;
+          }
+        }
+        if (!goDirectlyToApply) {
+          const prevState = slot.state;
+          slot.state = 8;
+          if (prevState === 2) {
+            slot.aux = 0x0c;
+          }
+          slot.dir = horiz;
+          return true;
+        }
+      }
+
+      if (!goDirectlyToApply) {
+        if (nextTile !== 0xd1 && nextTile !== 1) return false;
+        if (nextCR >= 0x70) return false;
+        const nextBelow = world.getTile(0x510 + nextCR);
+        if (nextBelow !== nextTile) {
+          if (nextBelow !== 0x0b) return false;
+          if (slot.prom < 0x0f) return false;
+        }
+
+        const curTile = world.getTile(0x500 + curCR);
+        const onContCur = (curTile === 0xd1 || curTile === 1) &&
+          curCR < 0x70 &&
+          world.getTile(0x510 + curCR) === curTile;
+
+        if (!onContCur && slot.state === 1) {
+          const xMod = slot.x & 0x0f;
+          if (horiz & RIGHT) {
+            if (xMod !== 7) return false;
+          } else {
+            if (xMod !== 9) return false;
+          }
+        }
+
+        if (slot.state === 1) {
+          slot.prom = 0;
+          const diff = slot.y - 0x20;
+          slot.top_y = diff & 0xff;
+          slot.top_y_hi = (slot.y_hi - (diff < 0 ? 1 : 0)) & 0xff;
+        }
+      }
+
+      slot.aux = nextCR;
+      if (slot.state === 2 && slot.top_y === slot.y) {
+        const sum = slot.y + 8;
+        slot.y = sum & 0xff;
+        slot.y_hi = (slot.top_y_hi + (sum >> 8)) & 0xff;
+      }
+      slot.state = 9;
+      slot.dir = horiz;
       return true;
     }
 
@@ -211,6 +304,7 @@
       } else if (slot.state === 1) {
         if (this.tryEnterLadder(slot, b, world)) return;
         if (this.tryEnterHole(slot, world)) return;
+        if (this.trySideTransition(slot, b, world)) return;
         if (!this.canPassWall(slot, b, world)) {
           slot.state = 0;
           slot.dir = (slot.dir + 1) & 0xff;
@@ -301,8 +395,28 @@
           slot.kind = null;
           slot.n = 0;
         }
+      } else if (slot.state === 8) {
+        slot.x = (slot.x + (slot.dir === RIGHT ? 1 : -1)) & 0xff;
+        slot.aux = (slot.aux - 1) & 0xff;
+        if (slot.aux === 0) {
+          slot.aux = 1;
+          this.tryEnterHole(slot, world);
+        }
+      } else if (slot.state === 9) {
+        slot.x = (slot.x + (slot.dir === RIGHT ? 1 : -1)) & 0xff;
+        this.updateCR(slot);
+        if (slot.cr === slot.aux && (slot.x & 0x0f) === 0) {
+          if (slot.flag & 2) {
+            slot.flag &= ~0x02;
+            slot.prom = 0x1d;
+            slot.top_y = slot.y & 0xe0;
+            slot.top_y_hi = slot.y_hi;
+          }
+          slot.state = (slot.prom !== 0) ? 2 : 0;
+        }
       } else if (slot.state === 2) {
         slot.flag &= ~0x02;
+        if (this.trySideTransition(slot, b, world)) return;
         if (b & (UP | DOWN)) {
           slot.dir = b & (UP | DOWN);
           const d = (slot.dir & DOWN) ? -1 : 1;
@@ -498,11 +612,15 @@
     }
 
     poke(addr, val) {
-      if (addr === 0x309) this.mario.x = val;
+      if (addr === 0x304) this.mario.aux = val;
+      else if (addr === 0x309) this.mario.x = val;
+      else if (addr === 0x314) this.mario.top_y_hi = val;
       else if (addr === 0x315) this.mario.y = val;
       else if (addr === 0x316) this.mario.y_hi = val;
       else if (addr === 0x317) this.mario.flag = val;
+      else if (addr === 0x324) this.spike.aux = val;
       else if (addr === 0x329) this.spike.x = val;
+      else if (addr === 0x334) this.spike.top_y_hi = val;
       else if (addr === 0x335) this.spike.y = val;
       else if (addr === 0x336) this.spike.y_hi = val;
       else if (addr === 0x337) this.spike.flag = val;
@@ -518,6 +636,7 @@
       const s = this.spike;
       switch (addr) {
         case 0x300: return m.state;
+        case 0x304: return m.aux;
         case 0x308: return m.bits;
         case 0x309: return m.x;
         case 0x30d: return m.prom;
@@ -525,10 +644,12 @@
         case 0x30f: return m.cr;
         case 0x312: return m.dir;
         case 0x313: return m.top_y;
+        case 0x314: return m.top_y_hi;
         case 0x315: return m.y;
         case 0x316: return m.y_hi;
         case 0x317: return m.flag;
         case 0x320: return s.state;
+        case 0x324: return s.aux;
         case 0x328: return s.bits;
         case 0x329: return s.x;
         case 0x32d: return s.prom;
@@ -536,6 +657,7 @@
         case 0x32f: return s.cr;
         case 0x332: return s.dir;
         case 0x333: return s.top_y;
+        case 0x334: return s.top_y_hi;
         case 0x335: return s.y;
         case 0x336: return s.y_hi;
         case 0x337: return s.flag;
