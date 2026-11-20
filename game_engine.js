@@ -365,10 +365,8 @@
         }
       } else if (slot.state === 3) {
         if (slot.kind !== "arrive" && slot.kind !== "arrive_top") {
-          const targetRow = slot.kind === "enter_top"
-            ? Math.min(world.rows - 1, slot.row + 1)
-            : slot.row;
-          if (!isLadderTile(world.getTile(targetRow, slot.col))) {
+          const ladderRow = Math.max(0, Math.min(world.rows - 1, Math.floor(slot.topY / 32)));
+          if (!isLadderTile(world.getTile(ladderRow, slot.col))) {
             slot.state = 5;
             slot.prom = slot.isMario ? 0 : 0x12;
             slot.topY = slot.y;
@@ -439,10 +437,8 @@
 
         slot.y = slot.topY;
       } else if (slot.state === 6) {
-        const targetRow = slot.kind === "enter_top_cont"
-          ? Math.min(world.rows - 1, slot.row + 1)
-          : slot.row;
-        if (!isLadderTile(world.getTile(targetRow, slot.col))) {
+        const ladderRow = Math.max(0, Math.min(world.rows - 1, Math.floor(slot.topY / 32)));
+        if (!isLadderTile(world.getTile(ladderRow, slot.col))) {
           slot.state = 5;
           slot.prom = slot.isMario ? 0 : 0x12;
           slot.topY = slot.y;
@@ -493,13 +489,14 @@
         }
       } else if (slot.state === 2) {
         slot.flag &= ~0x02;
-        const curTile = world.getTile(slot.row, slot.col);
-        if (!isLadderTile(curTile)) {
+        const ladderRow = Math.max(0, Math.min(world.rows - 1, Math.floor(slot.topY / 32)));
+        if (!isLadderTile(world.getTile(ladderRow, slot.col))) {
           slot.state = 5;
           slot.prom = slot.isMario ? 0 : 0x12;
           slot.topY = slot.y;
           return;
         }
+        const curTile = world.getTile(slot.row, slot.col);
         if (this.trySideTransition(slot, b, world)) return;
         if (b & (UP | DOWN)) {
           slot.dir = b & (UP | DOWN);
