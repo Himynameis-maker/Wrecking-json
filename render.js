@@ -1,7 +1,14 @@
 (function (root) {
   "use strict";
 
-  // ヘルメットなし・特徴のない一般作業員パレット
+  const TILE = (root.WreckGame && root.WreckGame.TILE) || {
+    EMPTY: 0,
+    LADDER: 1,
+    WALL: 8,
+    HOLE: 9
+  };
+
+  // ヘルメットなし・一般作業員パレット
   const PALETTE_WORKER = {
     H: "#4a321c",
     S: "#f4be8c",
@@ -343,10 +350,13 @@
   }
 
   class Renderer {
-    constructor(canvas) {
+    constructor(canvas, options = {}) {
       this.canvas = canvas;
       this.ctx = canvas.getContext("2d");
       this.ctx.imageSmoothingEnabled = false;
+      this.viewHeight = options.viewHeight || 240;
+      this.camY = 0;
+
       this.marioSprites = makeSpriteSet(
         {
           idle: PLAYER_IDLE,
@@ -369,54 +379,123 @@
       );
     }
 
-    draw(sim) {
-      const ctx = this.ctx;
-      ctx.fillStyle = "#080b14";
-      ctx.fillRect(0, 0, 256, 240);
+    ensureCanvasSize(world) {
+      const targetW = world.worldWidth;
+      const targetH = this.viewHeight;
+      if (this.canvas.width !== targetW || this.canvas.height !== targetH) {
+        this.canvas.width = targetW;
+        this.canvas.height = targetH;
+        this.ctx.imageSmoothingEnabled = false;
+      }
+      this.canvas.style.aspectRatio = targetW + " / " + targetH;
+    }
 
-      // 床6段（Y = 32, 64, 96, 128, 160, 192）
-      for (let row = 0; row < 6; row++) {
+    getWorldHeight(world) {
+      return world.rows * 32 + 12;
+    }
+
+    resetCamera(world) {
+      const maxCamY = Math.max(0, this.getWorldHeight(world) - this.viewHeight);
+      const targetY = world.mario.y - this.viewHeight * 0.58;
+      this.camY = Math.max(0, Math.min(maxCamY, Math.round(targetY)));
+    }
+
+    updateCamera(world) {
+      const maxCamY = Math.max(0, this.getWorldHeight(world) - this.viewHeight);
+      if (maxCamY === 0) {
+        this.camY = 0;
+        return;
+      }
+      const targetY = Math.max(0, Math.min(maxCamY, world.mario.y - this.viewHeight * 0.58));
+      const diff = targetY - this.camY;
+      if (Math.abs(diff) <= 1.5) {
+        this.camY = targetY;
+      } else {
+        this.camY += diff * 0.2;
+      }
+    }
+
+    draw(world) {
+      this.ensureCanvasSize(world);
+      this.updateCamera(world);
+
+      const ctx = this.ctx;
+      const w = world.worldWidth;
+      const h = this.viewHeight;
+      const camOffset = Math.round(this.camY);
+
+      ctx.fillStyle = "#080b14";
+      ctx.fillRect(0, 0, w, h);
+
+      ctx.save();
+      ctx.translate(0, -camOffset);
+
+      // 左右端ループゾーンの目印（ごく薄いガイド線）
+      ctx.fillStyle = "rgba(88, 144, 248, 0.08)";
+      ctx.fillRect(0, 0, 1, world.rows * 32);
+      ctx.fillRect(w - 1, 0, 1, world.rows * 32);
+
+      // 床（行ごとに穴以外は青い鉄骨を描画、最下段は常に足場あり）
+      for (let row = 0; row < world.rows; row++) {
         const floorY = (row + 1) * 32;
-        ctx.fillStyle = "#2858b8";
-        ctx.fillRect(0, floorY, 256, 6);
-        ctx.fillStyle = "#5890f8";
-        ctx.fillRect(0, floorY, 256, 2);
-        ctx.fillStyle = "#183070";
-        for (let x = 0; x < 256; x += 16) {
+        const isBottomRow = row === world.rows - 1;
+        for (let col = 0; col < world.cols; col++) {
+          const tile = world.getTile(row, col);
+          const x = col * 16;
+          if (!isBottomRow && tile === TILE.HOLE) {
+            // 穴スペース（視認しやすい暗めの縦ガイド）
+            ctx.fillStyle = "#0d1222";
+            ctx.fillRect(x, floorY, 16, 6);
+            continue;
+          }
+          ctx.fillStyle = "#2858b8";
+          ctx.fillRect(x, floorY, 16, 6);
+          ctx.fillStyle = "#5890f8";
+          ctx.fillRect(x, floorY, 16, 2);
+          ctx.fillStyle = "#183070";
           ctx.fillRect(x + 2, floorY + 2, 12, 2);
         }
       }
 
       // マップタイル（はしご=1、壁=8）
-      for (const [addr, val] of sim.ladders.entries()) {
-        const pos = addr - 0x500;
-        const row = (pos >> 4) & 0x0f;
-        const col = pos & 0x0f;
-        const x = col * 16;
+      for (let row = 0; row < world.rows; row++) {
         const yTop = row * 32;
+        for (let col = 0; col < world.cols; col++) {
+          const val = world.getTile(row, col);
+          if (val === TILE.EMPTY || val === TILE.HOLE) continue;
+          const x = col * 16;
 
-        if (val === 1) {
-          ctx.fillStyle = "#d89040";
-          ctx.fillRect(x + 2, yTop, 2, 32);
-          ctx.fillRect(x + 12, yTop, 2, 32);
-          ctx.fillStyle = "#f8c068";
-          for (let ry = 3; ry < 32; ry += 6) {
-            ctx.fillRect(x + 2, yTop + ry, 12, 2);
+          if (val === TILE.LADDER) {
+            ctx.fillStyle = "#d89040";
+            ctx.fillRect(x + 2, yTop, 2, 32);
+            ctx.fillRect(x + 12, yTop, 2, 32);
+            ctx.fillStyle = "#f8c068";
+            for (let ry = 3; ry < 32; ry += 6) {
+              ctx.fillRect(x + 2, yTop + ry, 12, 2);
+            }
+          } else if (val === TILE.WALL) {
+            // 天板（yTop+6..+11）+ 正面（yTop+11..+32）：壁乗り時の足元 yTop+11 に接地
+            ctx.fillStyle = "#5c2419";
+            ctx.fillRect(x, yTop + 6, 16, 5);
+            ctx.fillStyle = "#a8442c";
+            ctx.fillRect(x + 1, yTop + 7, 14, 3);
+
+            ctx.fillStyle = "#883828";
+            ctx.fillRect(x, yTop + 11, 16, 21);
+            ctx.fillStyle = "#c05838";
+            ctx.fillRect(x + 1, yTop + 12, 6, 6);
+            ctx.fillRect(x + 9, yTop + 12, 6, 6);
+            ctx.fillRect(x + 1, yTop + 20, 14, 5);
+            ctx.fillRect(x + 1, yTop + 27, 6, 4);
+            ctx.fillRect(x + 9, yTop + 27, 6, 4);
           }
-        } else if (val === 8) {
-          ctx.fillStyle = "#883828";
-          ctx.fillRect(x, yTop + 6, 16, 26);
-          ctx.fillStyle = "#c05838";
-          ctx.fillRect(x + 1, yTop + 7, 6, 7);
-          ctx.fillRect(x + 9, yTop + 7, 6, 7);
-          ctx.fillRect(x + 1, yTop + 16, 14, 7);
-          ctx.fillRect(x + 1, yTop + 25, 6, 6);
-          ctx.fillRect(x + 9, yTop + 25, 6, 6);
         }
       }
 
-      this.drawActor(sim.spike, this.spikeSprites);
-      this.drawActor(sim.mario, this.marioSprites);
+      this.drawActor(world.spike, this.spikeSprites, w);
+      this.drawActor(world.mario, this.marioSprites, w);
+
+      ctx.restore();
     }
 
     pickFrame(slot) {
@@ -431,6 +510,16 @@
         }
         return "climb1_" + facing;
       }
+      if (slot.state === 6) {
+        const idx = ((slot.n >> 2) & 1) ? "climb2" : "climb1";
+        return idx + "_" + facing;
+      }
+      if (slot.state === 5) {
+        return "walk1_" + facing;
+      }
+      if (slot.state === 8 || slot.state === 9) {
+        return "walk2_" + facing;
+      }
       if (slot.state === 1) {
         const cycle = ["walk1", "idle", "walk2", "idle"];
         const idx = cycle[(slot.x >> 2) & 3];
@@ -439,13 +528,13 @@
       return "idle_" + facing;
     }
 
-    drawActor(slot, sprites) {
+    drawActor(slot, sprites, worldWidth) {
       const img = sprites[this.pickFrame(slot)];
       if (!img) return;
       const drawY = slot.y - 26;
       this.ctx.drawImage(img, slot.x, drawY);
-      if (slot.x > 240) {
-        this.ctx.drawImage(img, slot.x - 256, drawY);
+      if (slot.x > worldWidth - 16) {
+        this.ctx.drawImage(img, slot.x - worldWidth, drawY);
       }
     }
   }

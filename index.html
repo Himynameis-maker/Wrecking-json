@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>親方AI シミュレータ（PC / iPhone）</title>
+  <title>レッキングクローン 試作ベース（PC / iPhone）</title>
   <style>
     * { box-sizing: border-box; }
     body {
@@ -20,7 +20,7 @@
     }
     .topbar {
       width: 100%;
-      max-width: 540px;
+      max-width: 580px;
       display: flex;
       flex-wrap: wrap;
       gap: 6px;
@@ -39,7 +39,7 @@
       border: 1px solid #3c4863;
       border-radius: 8px;
       padding: 7px 10px;
-      font-size: 0.86rem;
+      font-size: 0.84rem;
       text-decoration: none;
       cursor: pointer;
       touch-action: manipulation;
@@ -53,17 +53,20 @@
       border-radius: 8px;
       overflow: hidden;
     }
+    .screen-wrap.scroll-x {
+      overflow-x: auto;
+      max-width: 100%;
+    }
     canvas#gameCanvas {
       display: block;
       width: 100%;
       height: auto;
-      aspect-ratio: 256 / 240;
       image-rendering: pixelated;
       image-rendering: crisp-edges;
     }
     .controls-area {
       width: 100%;
-      max-width: 540px;
+      max-width: 580px;
       display: flex;
       align-items: center;
       justify-content: space-between;
@@ -106,7 +109,7 @@
     .hud {
       flex: 1;
       font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-      font-size: 0.78rem;
+      font-size: 0.76rem;
       background: #181c26;
       border: 1px solid #2d3548;
       border-radius: 8px;
@@ -117,7 +120,7 @@
     }
     .hint {
       width: 100%;
-      max-width: 540px;
+      max-width: 580px;
       font-size: 0.78rem;
       color: #9ba7be;
       text-align: center;
@@ -128,17 +131,24 @@
   <div class="topbar">
     <div class="btn-row">
       <select id="stageSelect" aria-label="ステージ選択">
-        <option value="practice">練習ステージ（はしご複数＋壁8）</option>
-        <option value="u6">U6 初期構成（f0基準・はしご1本）</option>
+        <option value="standard8">標準16×8（穴・壁・連続はしご・上下カメラ）</option>
+        <option value="wide10">拡大20×10（マップ拡大テスト）</option>
+        <option value="compact6">小型12×6（狭小テスト）</option>
+        <option value="u6">U6 基準（16×6・はしご1本）</option>
+      </select>
+      <select id="zoomSelect" aria-label="表示サイズ">
+        <option value="fit">画面幅フィット</option>
+        <option value="2x">等倍2x (1dot=2px)</option>
+        <option value="1x">等倍1x (1dot=1px)</option>
       </select>
       <button id="resetBtn" type="button">リセット</button>
       <button id="pauseBtn" type="button">一時停止</button>
       <button id="stepBtn" type="button">+1F</button>
     </div>
-    <a class="link-btn" href="./test.html">982行テスト</a>
+    <a class="link-btn" href="./test.html">検証テスト(1784行)</a>
   </div>
 
-  <div class="screen-wrap">
+  <div id="screenWrap" class="screen-wrap">
     <canvas id="gameCanvas" width="256" height="240"></canvas>
   </div>
 
@@ -155,16 +165,18 @@
     操作: 画面の擬似スティック（iPhone/マウス） または キーボード（矢印キー / WASD）
   </div>
 
-  <script src="./sim.js"></script>
+  <script src="./game_engine.js"></script>
   <script src="./render.js"></script>
   <script>
     (function () {
-      const { RIGHT, LEFT, DOWN, UP, Sim } = window.WreckSim;
+      const { RIGHT, LEFT, DOWN, UP, TILE, GameWorld } = window.WreckGame;
       const { Renderer } = window.WreckRender;
 
       const canvas = document.getElementById("gameCanvas");
-      const renderer = new Renderer(canvas);
+      const screenWrap = document.getElementById("screenWrap");
+      const renderer = new Renderer(canvas, { viewHeight: 240 });
       const stageSelect = document.getElementById("stageSelect");
+      const zoomSelect = document.getElementById("zoomSelect");
       const resetBtn = document.getElementById("resetBtn");
       const pauseBtn = document.getElementById("pauseBtn");
       const stepBtn = document.getElementById("stepBtn");
@@ -172,42 +184,103 @@
       const stickBase = document.getElementById("stickBase");
       const stickKnob = document.getElementById("stickKnob");
 
+      const L = TILE.LADDER;
+      const W = TILE.WALL;
+      const H = TILE.HOLE;
+
       const STAGES = {
-        u6: {
-          ladders: { 0x515: 1 },
-          mario: { x: 80, y: 64, cr: 0x15 },
-          spike: { x: 80, y: 64, cr: 0x15 }
+        standard8: {
+          cols: 16,
+          rows: 8,
+          tiles: [
+            // 連続はしご・穴・壁乗り・横飛び・左右ループ確認用
+            [0, 5, H], [0, 6, H], [0, 10, L],
+            [1, 3, L], [1, 5, W], [1, 6, L], [1, 10, L], [1, 13, W],
+            [2, 3, L], [2, 6, L], [2, 8, H], [2, 10, L],
+            [3, 2, W], [3, 6, L], [3, 8, W], [3, 12, L],
+            [4, 4, L], [4, 7, H], [4, 12, L], [4, 14, W],
+            [5, 4, L], [5, 7, L], [5, 9, W], [5, 11, H],
+            [6, 2, L], [6, 7, L], [6, 11, W], [6, 14, L],
+            [7, 0, W], [7, 15, W]
+          ],
+          mario: { x: 48, y: 224 },
+          spike: { x: 208, y: 64 }
         },
-        practice: {
-          ladders: {
-            0x515: 1, 0x519: 8,
-            0x522: 1, 0x526: 8, 0x52c: 1,
-            0x537: 1, 0x53b: 8,
-            0x543: 1, 0x546: 8, 0x54d: 1,
-            0x554: 8, 0x558: 1
-          },
-          mario: { x: 32, y: 192, cr: 0x52 },
-          spike: { x: 208, y: 64, cr: 0x1d }
+        wide10: {
+          cols: 20,
+          rows: 10,
+          tiles: [
+            [0, 4, L], [0, 9, H], [0, 15, L],
+            [1, 4, L], [1, 9, W], [1, 12, H], [1, 15, L], [1, 18, W],
+            [2, 2, W], [2, 4, L], [2, 7, L], [2, 12, L], [2, 15, L],
+            [3, 7, L], [3, 10, W], [3, 12, L], [3, 17, H],
+            [4, 3, H], [4, 7, L], [4, 14, L], [4, 17, W],
+            [5, 3, L], [5, 5, W], [5, 10, H], [5, 14, L],
+            [6, 3, L], [6, 8, L], [6, 10, W], [6, 16, L],
+            [7, 1, W], [7, 8, L], [7, 12, H], [7, 16, L],
+            [8, 5, L], [8, 8, L], [8, 12, L], [8, 18, W],
+            [9, 5, L], [9, 12, L]
+          ],
+          mario: { x: 64, y: 320 },
+          spike: { x: 256, y: 64 }
+        },
+        compact6: {
+          cols: 12,
+          rows: 6,
+          tiles: [
+            [0, 3, H], [0, 8, L],
+            [1, 3, W], [1, 5, L], [1, 8, L],
+            [2, 2, L], [2, 5, L], [2, 9, W],
+            [3, 2, L], [3, 7, H], [3, 10, L],
+            [4, 4, W], [4, 7, L], [4, 10, L]
+          ],
+          mario: { x: 32, y: 192 },
+          spike: { x: 144, y: 64 }
+        },
+        u6: {
+          cols: 16,
+          rows: 6,
+          tiles: [[1, 5, L]],
+          mario: { x: 80, y: 64 },
+          spike: { x: 80, y: 64 }
         }
       };
 
-      let sim = null;
+      let world = null;
       let paused = false;
       let stickBits = 0;
       let keyBits = 0;
 
+      function applyZoomMode() {
+        if (!world) return;
+        const mode = zoomSelect.value;
+        screenWrap.classList.remove("scroll-x");
+        if (mode === "1x") {
+          screenWrap.style.maxWidth = world.worldWidth + "px";
+          canvas.style.width = world.worldWidth + "px";
+          screenWrap.classList.add("scroll-x");
+        } else if (mode === "2x") {
+          const w2 = world.worldWidth * 2;
+          screenWrap.style.maxWidth = w2 + "px";
+          canvas.style.width = w2 + "px";
+          screenWrap.classList.add("scroll-x");
+        } else {
+          screenWrap.style.maxWidth = Math.max(512, world.worldWidth * 2) + "px";
+          canvas.style.width = "100%";
+        }
+      }
+
       function createStage() {
-        const cfg = STAGES[stageSelect.value] || STAGES.u6;
-        sim = new Sim({}, {});
-        sim.ladders = new Map(
-          Object.entries(cfg.ladders).map(([k, v]) => [Number(k), v])
-        );
-        sim.mario.x = cfg.mario.x;
-        sim.mario.y = cfg.mario.y;
-        sim.mario.cr = cfg.mario.cr;
-        sim.spike.x = cfg.spike.x;
-        sim.spike.y = cfg.spike.y;
-        sim.spike.cr = cfg.spike.cr;
+        const cfg = STAGES[stageSelect.value] || STAGES.standard8;
+        world = new GameWorld({
+          cols: cfg.cols,
+          rows: cfg.rows,
+          tiles: cfg.tiles,
+          mario: cfg.mario,
+          spike: cfg.spike
+        });
+        applyZoomMode();
+        renderer.resetCamera(world);
         renderNow();
       }
 
@@ -223,9 +296,7 @@
       }
 
       function stepOneFrame() {
-        sim.inputs[sim.f] = currentBits();
-        if (sim.f >= 4) delete sim.inputs[sim.f - 4];
-        sim.tick();
+        world.step(currentBits());
       }
 
       function dirLabel(b) {
@@ -237,20 +308,16 @@
         return out.length ? out.join("") : "-";
       }
 
-      function hex2(v) {
-        return "$" + v.toString(16).toUpperCase().padStart(2, "0");
-      }
-
       function renderNow() {
-        renderer.draw(sim);
-        const m = sim.mario;
-        const s = sim.spike;
-        const ai = sim.spikeAI;
+        renderer.draw(world);
+        const m = world.mario;
+        const s = world.spike;
+        const ai = world.spikeAI;
         const inp = currentBits();
         hudEl.textContent =
-          "F:" + sim.f + "  IN:" + dirLabel(inp) + (paused ? " [PAUSE]" : "") + "\n" +
-          "Mario st:" + m.state + " X:" + m.x + " Y:" + m.y + " cr:" + hex2(m.cr) + " d:" + m.dir + "\n" +
-          "Spike st:" + s.state + " X:" + s.x + " Y:" + s.y + " cr:" + hex2(s.cr) + " d:" + s.dir + "\n" +
+          "MAP:" + world.cols + "x" + world.rows + " F:" + world.f + " camY:" + Math.round(renderer.camY) + " IN:" + dirLabel(inp) + (paused ? " [PAUSE]" : "") + "\n" +
+          "Mario st:" + m.state + " X:" + m.x + " Y:" + m.y + " (" + m.row + "," + m.col + ") d:" + m.dir + (m.flag & 2 ? " [WALL]" : "") + "\n" +
+          "Spike st:" + s.state + " X:" + s.x + " Y:" + s.y + " (" + s.row + "," + s.col + ") d:" + s.dir + (s.flag & 2 ? " [WALL]" : "") + "\n" +
           "AI    bits:" + dirLabel(s.bits) + "(" + s.bits + ") $39:" + ai.mem39 + " $3A:" + ai.timer;
       }
 
@@ -348,6 +415,7 @@
       });
 
       stageSelect.addEventListener("change", createStage);
+      zoomSelect.addEventListener("change", applyZoomMode);
       resetBtn.addEventListener("click", createStage);
 
       pauseBtn.addEventListener("click", function () {
