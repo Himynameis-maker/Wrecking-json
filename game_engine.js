@@ -41,6 +41,15 @@
     return t === TILE.DRUM;
   }
 
+  function getHammerTiming(slot) {
+    if (slot.isMario) {
+      return slot.isGolden
+        ? { totalFrames: 7, hitFrame: 5, recoverStart: 7 }
+        : { totalFrames: 21, hitFrame: 17, recoverStart: 21 };
+    }
+    return { totalFrames: 27, hitFrame: 14, recoverStart: 23 };
+  }
+
   // State 5 落下速度テーブル（前半=Mario用, 後半$12〜=Spike用）
   const FALL_TABLE = [
     0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 1, 2, 1, 2, 2, 3, -1,
@@ -78,6 +87,7 @@
       this.hammerTimer = 0;
       this.hammerHitDone = false;
       this.isGolden = false;
+      this.prevHammer = false;
     }
   }
 
@@ -351,8 +361,7 @@
           slot.dir = (slot.dir + 1) & 0xff;
         }
       } else if (slot.state === 4) {
-        const totalFrames = slot.isMario ? (slot.isGolden ? 7 : 21) : 24;
-        const hitFrame = slot.isMario ? (slot.isGolden ? 5 : 15) : 12;
+        const { totalFrames, hitFrame } = getHammerTiming(slot);
         slot.hammerTimer += 1;
         if (!slot.hammerHitDone && slot.hammerTimer >= hitFrame) {
           slot.hammerHitDone = true;
@@ -858,7 +867,11 @@
         b &= ~(UP | DOWN);
       }
 
-      this.mario.bits = b;
+      const hammerNow = (b & HAMMER) !== 0;
+      const hammerEdge = hammerNow && !this.mario.prevHammer;
+      this.mario.prevHammer = hammerNow;
+      this.mario.bits = (b & ~HAMMER) | (hammerEdge ? HAMMER : 0);
+
       this.stepper.step(this.mario, this);
 
       if (this.f % 2 === 1) {
@@ -875,6 +888,7 @@
   const api = {
     RIGHT, LEFT, DOWN, UP, HAMMER,
     TILE,
+    getHammerTiming,
     isBreakableTile,
     isLadderTile,
     isSameLadderType,

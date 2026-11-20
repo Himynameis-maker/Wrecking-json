@@ -18,6 +18,14 @@
   const isSameLadderType = G.isSameLadderType || ((a, b) =>
     (a === TILE.LADDER && b === TILE.LADDER) ||
     (a === TILE.BREAK_LADDER && b === TILE.BREAK_LADDER));
+  const getHammerTiming = G.getHammerTiming || (slot => {
+    if (slot.isMario) {
+      return slot.isGolden
+        ? { totalFrames: 7, hitFrame: 5, recoverStart: 7 }
+        : { totalFrames: 21, hitFrame: 17, recoverStart: 21 };
+    }
+    return { totalFrames: 27, hitFrame: 14, recoverStart: 23 };
+  });
 
   // ヘルメットなし・一般作業員パレット
   const PALETTE_WORKER = {
@@ -706,13 +714,17 @@
       const ctx = this.ctx;
       const faceVal = slot.facing || slot.dir;
       const isLeft = (faceVal & 2) !== 0;
-      const total = slot.isMario ? (slot.isGolden ? 7 : 21) : 24;
-      const hitF = slot.isMario ? (slot.isGolden ? 5 : 15) : 12;
+      const timing = getHammerTiming(slot);
+      const total = timing.totalFrames;
+      const hitF = timing.hitFrame;
+      const recoverStart = timing.recoverStart != null ? timing.recoverStart : total;
       const t = slot.hammerTimer;
 
-      // 0: 後ろ振りかぶり, 1: 頭上構え, 2: 前へ振り下ろし
+      // 0: 後ろ振りかぶり, 1: 頭上構え, 2: 前へ振り下ろし, 3: 振り終わり戻り硬直（親方終盤）
       let phase = 0;
-      if (t >= hitF) {
+      if (t >= recoverStart) {
+        phase = 3;
+      } else if (t >= hitF) {
         phase = 2;
       } else if (t >= Math.floor(hitF * 0.55)) {
         phase = 1;
@@ -741,7 +753,7 @@
         ctx.fillRect(hx, hy, 9, 6);
         ctx.fillStyle = "#b0c0d4";
         ctx.fillRect(hx + 1, hy + 1, 7, 1);
-      } else {
+      } else if (phase === 2) {
         // 前下へ振り下ろす
         const hx = isLeft ? baseX - 7 : baseX + 14;
         const hy = baseY + 11;
@@ -759,6 +771,16 @@
           ctx.fillRect(sx, baseY + 9, 2, 2);
           ctx.fillRect(sx, baseY + 17, 2, 2);
         }
+      } else {
+        // 振り終わり戻り硬直（親方終盤 $4D コマ相当）
+        const hx = isLeft ? baseX - 2 : baseX + 10;
+        const hy = baseY + 14;
+        ctx.fillStyle = gripColor;
+        ctx.fillRect(isLeft ? baseX + 4 : baseX + 10, baseY + 11, 2, 5);
+        ctx.fillStyle = headColor;
+        ctx.fillRect(hx, hy, 8, 5);
+        ctx.fillStyle = "#b0c0d4";
+        ctx.fillRect(hx + 1, hy + 1, 6, 1);
       }
     }
 
