@@ -420,7 +420,12 @@
         if (b & (UP | DOWN)) {
           slot.dir = b & (UP | DOWN);
           const d = (slot.dir & DOWN) ? -1 : 1;
-          slot.prom += d;
+          const nextProm = slot.prom + d;
+          const curTile = world.getTile(0x500 + slot.cr);
+          if (nextProm === 0x1f && curTile >= 8 && curTile < 0x0c) {
+            return;
+          }
+          slot.prom = nextProm;
           if (slot.prom >= 32) {
             slot.y = slot.top_y;
             slot.prom = 0;
