@@ -1216,7 +1216,7 @@
       return true;
     }
 
-    triggerBomb(row, col, byMario) {
+    triggerBomb(row, col, byMario = true) {
       const c = this.wrapCol(col);
       this.setTile(row, c, TILE.EMPTY);
       this.explosions.push({
@@ -1253,10 +1253,12 @@
       }
 
       if (this.waves.length === 0) return;
+      const prevWaves = this.waves;
+      this.waves = [];
       const nextWaves = [];
       const triggeredCells = new Set();
 
-      for (const w of this.waves) {
+      for (const w of prevWaves) {
         w.timer -= 1;
         if (w.timer > 0) {
           nextWaves.push(w);
@@ -1269,13 +1271,12 @@
         if (!isBreakableTile(t)) continue;
 
         triggeredCells.add(key);
-        if (t === TILE.BOMB) {
-          this.triggerBomb(w.row, w.col, w.byMario);
-        } else {
-          this.hitCell(w.row, w.col, w.byMario);
+        this.hitCell(w.row, w.col, true);
+
+        if (t !== TILE.BOMB) {
           const afterTile = this.getTile(w.row, w.col);
           if (t === TILE.BREAK_LADDER || afterTile !== TILE.EMPTY) {
-            this.explosions.push({ row: w.row, col: w.col, timer: 10, maxTimer: 10, age: 0, kind: "spark", byMario: !!w.byMario });
+            this.explosions.push({ row: w.row, col: w.col, timer: 10, maxTimer: 10, age: 0, kind: "spark", byMario: true });
           }
           if (w.stepsLeft > 1) {
             nextWaves.push({
@@ -1284,12 +1285,12 @@
               dir: w.dir,
               timer: 10,
               stepsLeft: w.stepsLeft - 1,
-              byMario: !!w.byMario
+              byMario: true
             });
           }
         }
       }
-      this.waves = nextWaves;
+      this.waves = nextWaves.concat(this.waves);
     }
 
     updateSpikeHammer() {
