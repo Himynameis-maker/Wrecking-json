@@ -15,6 +15,9 @@
   const TILE = {
     EMPTY: 0x00,
     LADDER: 0x01,
+    DOOR_OPEN: 0x04,       // ドア全開（敵入出可・ダウン判定なし）
+    DOOR_CLOSING_1: 0x05,  // ドア閉じかけ1
+    DOOR_CLOSING_2: 0x07,  // ドア閉じかけ2
     WALL: 0x08,            // 互換エイリアス（ドラム缶）
     DRUM: 0x08,            // ドラム缶（横通行不可・上乗れる・壊せない）
     HOLE: 0x09,
@@ -26,11 +29,14 @@
     CRUMBLING_2: 0x52,     // 壊れかけはしご（残2）
     CRUMBLING_3: 0x53,     // 壊れかけはしご（残3）
     CRUMBLING_4: 0x54,     // 壊れかけはしご（残4）
+    DOOR_OPENING_2: 0x62,  // ドア開き始め2（マリオ叩き、ダウン判定あり）
+    DOOR_OPENING_1: 0x63,  // ドア開き始め1（マリオ叩き、ダウン判定あり）
     WALL_1: 0xc1,          // 1回壊せる壁
     WALL_2: 0x92,          // 2回壊せる壁
     WALL_3: 0xa3,          // 3回壊せる壁
     BOMB: 0xb1,            // 爆弾
     BREAK_LADDER: 0xd1,    // 壊せるはしご
+    DOOR: 0xe1,            // ドア（閉：叩ける・素通り可・破壊ターゲット外）
     PILLAR: 0xf1           // 支柱（鉄柱）
   };
 
@@ -57,9 +63,20 @@
     return t >= 0x71 && t <= 0x75;
   }
 
+  function isDoorOpeningTile(t) {
+    return (t & 0x80) === 0 && (t & 0x70) === 0x60 && (t & 0x07) >= 2;
+  }
+
+  function isDoorRelatedTile(t) {
+    return t === TILE.DOOR_OPEN ||
+      t === TILE.DOOR_CLOSING_1 ||
+      t === TILE.DOOR_CLOSING_2 ||
+      (t & 0x70) === 0x60;
+  }
+
   function isSameLadderType(t1, t2) {
     return (t1 === TILE.LADDER && t2 === TILE.LADDER) ||
-      (t1 === TILE.BREAK_LADDER && t2 === TILE.BREAK_LADDER);
+      (t1 === TILE.BREAK_LADDER && t === TILE.BREAK_LADDER);
   }
 
   function isHoleTile(t) {
@@ -149,6 +166,12 @@
   }
 
   class ActorStepper {
+    getActorSide(slot) {
+      if (slot.isMario) return 0;
+      if (!slot.isEnemy) return 1;
+      return slot.isBack ? 1 : 0;
+    }
+
     updateCR(slot, world) {
       const wx = world.wrapX(slot.x + 8);
       slot.col = Math.floor(wx / 16);
@@ -280,6 +303,17 @@
               this.enterKnockdown(slot);
               return true;
             }
+          }
+        }
+      }
+
+      if (!(slot.flag & 2)) {
+        const checkTile = world.getTile(checkRow, slot.col);
+        if (isDoorOpeningTile(checkTile)) {
+          const attackerSide = (checkTile & 0x08) !== 0 ? 1 : 0;
+          if (this.getActorSide(slot) !== attackerSide) {
+            this.enterKnockdown(slot);
+            return true;
           }
         }
       }
@@ -935,6 +969,8 @@
       this.crumblingLadders = new Map();
       this.pillarBreaks = new Map();
       this.fallingPillars = [];
+      this.doors = [];
+      this.doorMap = new Map();
       this.spikeAggressive = !!config.spikeAggressive;
 
       const stepper = new ActorStepper();
@@ -993,6 +1029,37 @@
       return this.pillarBreaks.get(this.cellKey(row, col)) || null;
     }
 
+    ensureDoorSlot(row, col) {
+      const wc = this.wrapCol(col);
+      const key = this.cellKey(row, wc);
+      let door = this.doorMap.get(key);
+      if (!door) {
+        door = {
+          row,
+          col: wc,
+          state: 1,
+          stepTimer: 0,
+          openTimer: 0,
+          byMario: true
+        };
+        this.doors.push(door);
+        this.doorMap.set(key, door);
+      }
+      return door;
+    }
+
+    removeDoorSlot(row, col) {
+      const wc = this.wrapCol(col);
+      const key = this.cellKey(row, wc);
+      const door = this.doorMap.get(key);
+      if (!door) return;
+      this.doorMap.delete(key);
+      const idx = this.doors.indexOf(door);
+      if (idx >= 0) {
+        this.doors.splice(idx, 1);
+      }
+    }
+
     loadTiles(src) {
       if (Array.isArray(src)) {
         for (const item of src) {
@@ -1018,6 +1085,11 @@
       if (row < 0 || row >= this.rows) return;
       const wc = this.wrapCol(col);
       this.tiles[row * this.cols + wc] = val;
+      if (val === TILE.DOOR) {
+        this.ensureDoorSlot(row, wc);
+      } else if (!isDoorRelatedTile(val)) {
+        this.removeDoorSlot(row, wc);
+      }
     }
 
     getTile(row, col) {
@@ -1039,6 +1111,72 @@
         }
       }
       return count;
+    }
+
+    openDoor(row, col, byMario = true, openDuration = 0x50) {
+      if (row < 0 || row >= this.rows) return false;
+      const c = this.wrapCol(col);
+      const door = this.ensureDoorSlot(row, c);
+      door.state = 2;
+      door.stepTimer = 4;
+      door.openTimer = openDuration;
+      door.byMario = !!byMario;
+      this.setTile(row, c, byMario ? TILE.DOOR_OPENING_1 : (TILE.DOOR_OPENING_1 | 0x08));
+      return true;
+    }
+
+    openAllDoors(byMario = true, openDuration = 0x20) {
+      for (let i = 0; i < this.doors.length; i++) {
+        const door = this.doors[i];
+        if (door.state === 0) continue;
+        door.state = 2;
+        door.stepTimer = 4;
+        door.openTimer = openDuration;
+        door.byMario = !!byMario;
+        this.setTile(door.row, door.col, byMario ? TILE.DOOR_OPENING_1 : (TILE.DOOR_OPENING_1 | 0x08));
+      }
+    }
+
+    holdDoorsOpen() {
+      for (let i = 0; i < this.doors.length; i++) {
+        if (this.doors[i].state !== 0) {
+          this.doors[i].openTimer = 0x40;
+        }
+      }
+    }
+
+    updateDoors() {
+      if (this.doors.length === 0) return;
+      for (let i = 0; i < this.doors.length; i++) {
+        const door = this.doors[i];
+        if (door.state <= 1) continue;
+        if (door.stepTimer > 0) {
+          door.stepTimer -= 1;
+          continue;
+        }
+        door.stepTimer = 4;
+        if (door.state === 2) {
+          const bit3 = this.getTile(door.row, door.col) & 0x08;
+          this.setTile(door.row, door.col, TILE.DOOR_OPENING_2 | bit3);
+          door.state = 3;
+        } else if (door.state === 3) {
+          this.setTile(door.row, door.col, TILE.DOOR_OPEN);
+          door.state = 4;
+        } else if (door.state === 4) {
+          door.openTimer -= 1;
+          if (door.openTimer <= 0) {
+            this.setTile(door.row, door.col, TILE.DOOR_CLOSING_1);
+            door.state = 5;
+          }
+        } else if (door.state === 5) {
+          this.setTile(door.row, door.col, TILE.DOOR_CLOSING_2);
+          door.state = 6;
+        } else if (door.state === 6) {
+          this.setTile(door.row, door.col, TILE.DOOR);
+          door.state = 1;
+          door.stepTimer = 0;
+        }
+      }
     }
 
     startCrumblingLadder(row, col, byMario, spreadUp = true, spreadDown = true) {
@@ -1206,6 +1344,10 @@
         return this.startCrumblingLadder(row, c, byMario, true, true);
       }
 
+      if (tile === TILE.DOOR) {
+        return this.openDoor(row, c, byMario, 0x50);
+      }
+
       if (tile === TILE.PILLAR) {
         return this.triggerPillar(row, c, byMario);
       }
@@ -1232,6 +1374,7 @@
     triggerBomb(row, col, byMario = true) {
       const c = this.wrapCol(col);
       this.setTile(row, c, TILE.EMPTY);
+      this.openAllDoors(byMario, 0x20);
       this.explosions.push({
         row,
         col: c,
@@ -1246,6 +1389,7 @@
     }
 
     updateEffectsAndWaves() {
+      this.updateDoors();
       this.updateCrumblingLadders();
       this.updatePillarBreakTiles();
       this.updateFallingPillars();
@@ -1278,6 +1422,19 @@
         }
 
         const t = this.getTile(w.row, w.col);
+        if (isDoorRelatedTile(t)) {
+          if (w.stepsLeft > 1) {
+            nextWaves.push({
+              row: w.row,
+              col: this.wrapCol(w.col + w.dir),
+              dir: w.dir,
+              timer: 10,
+              stepsLeft: w.stepsLeft - 1,
+              byMario: true
+            });
+          }
+          continue;
+        }
         if (!isBreakableTile(t)) continue;
 
         this.hitCell(w.row, w.col, true);
@@ -1314,7 +1471,7 @@
       if (tile === TILE.BOMB || !isBreakableTile(tile)) return;
 
       const sameCell = sp.row === ma.row && sp.col === ma.col;
-      if (sameCell || this.spikeAggressive) {
+      if (tile === TILE.DOOR || sameCell || this.spikeAggressive) {
         sp.bits |= HAMMER;
       }
     }
@@ -1355,6 +1512,8 @@
     isLadderTile,
     isCrumblingLadderTile,
     isPillarCrumblingTile,
+    isDoorOpeningTile,
+    isDoorRelatedTile,
     isSameLadderType,
     isHoleTile,
     isFallHoleTile,
