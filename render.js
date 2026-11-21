@@ -6,21 +6,32 @@
   const TILE = G.TILE || {
     EMPTY: 0x00,
     LADDER: 0x01,
+    DOOR_OPEN: 0x04,
+    DOOR_CLOSING_1: 0x05,
+    DOOR_CLOSING_2: 0x07,
     WALL: 0x08,
     DRUM: 0x08,
     HOLE: 0x09,
     HOLE_FALLING: 0x0c,
     DRUM_FALLING: 0x0d,
+    DOOR_OPENING_2: 0x62,
+    DOOR_OPENING_1: 0x63,
     WALL_1: 0xc1,
     WALL_2: 0x92,
     WALL_3: 0xa3,
     BOMB: 0xb1,
     BREAK_LADDER: 0xd1,
+    DOOR: 0xe1,
     PILLAR: 0xf1
   };
   const isHoleTile = G.isHoleTile || (t => t >= 0x09 && t <= 0x0b);
   const isCrumblingLadderTile = G.isCrumblingLadderTile || (t => t >= 0x51 && t <= 0x55);
   const isPillarCrumblingTile = G.isPillarCrumblingTile || (t => t >= 0x71 && t <= 0x75);
+  const isDoorRelatedTile = G.isDoorRelatedTile || (t =>
+    t === TILE.DOOR_OPEN ||
+    t === TILE.DOOR_CLOSING_1 ||
+    t === TILE.DOOR_CLOSING_2 ||
+    (t & 0x70) === 0x60);
   const isSameLadderType = G.isSameLadderType || ((a, b) =>
     (a === TILE.LADDER && b === TILE.LADDER) ||
     (a === TILE.BREAK_LADDER && b === TILE.BREAK_LADDER));
@@ -535,6 +546,87 @@
       ctx.fillRect(x + 2, yTop + 28, 12, 4);
     }
 
+    drawDoor(ctx, x, yTop, tile, frame) {
+      const base = tile & 0xf7;
+      let panelW = 6; // 閉じた状態: 左右各6px
+      let lampColor = "#2c4c50";
+
+      if (base === TILE.DOOR_OPENING_1 || base === TILE.DOOR_CLOSING_2) {
+        panelW = 4;
+        if (base === TILE.DOOR_OPENING_1) {
+          lampColor = (tile & 0x08) ? "#ff7840" : "#b8ffff";
+        } else {
+          lampColor = "#f0c048";
+        }
+      } else if (base === TILE.DOOR_OPENING_2 || base === TILE.DOOR_CLOSING_1) {
+        panelW = 2;
+        if (base === TILE.DOOR_OPENING_2) {
+          lampColor = (tile & 0x08) ? "#ff7840" : "#b8ffff";
+        } else {
+          lampColor = "#f0c048";
+        }
+      } else if (base === TILE.DOOR_OPEN) {
+        panelW = 0;
+        lampColor = "#48f078";
+      }
+
+      // 外枠・自動ドア上部センサーレール
+      ctx.fillStyle = "#1f4246";
+      ctx.fillRect(x + 1, yTop + 3, 14, 29);
+      ctx.fillStyle = "#3c8084";
+      ctx.fillRect(x + 1, yTop + 3, 14, 3);
+      ctx.fillRect(x + 1, yTop + 6, 1, 26);
+      ctx.fillRect(x + 14, yTop + 6, 1, 26);
+      ctx.fillStyle = "#6cc8c8";
+      ctx.fillRect(x + 2, yTop + 3, 12, 1);
+
+      // センサーランプ
+      ctx.fillStyle = lampColor;
+      ctx.fillRect(x + 7, yTop + 4, 2, 1);
+
+      // 奥側の暗い出入口空間
+      ctx.fillStyle = "#04060c";
+      ctx.fillRect(x + 2, yTop + 6, 12, 26);
+      if (panelW === 0) {
+        ctx.fillStyle = "#0e1a26";
+        ctx.fillRect(x + 2, yTop + 6, 1, 26);
+        ctx.fillRect(x + 13, yTop + 6, 1, 26);
+      }
+
+      // 開け始めのダウン判定中フラッシュ縁取り
+      if ((tile & 0x80) === 0 && (tile & 0x70) === 0x60 && ((frame >> 1) & 1) === 0) {
+        ctx.fillStyle = (tile & 0x08) ? "rgba(255, 110, 60, 0.35)" : "rgba(140, 245, 255, 0.35)";
+        ctx.fillRect(x + 2 + panelW, yTop + 6, 12 - panelW * 2, 26);
+      }
+
+      // 左右両開きの自動ドアパネル
+      if (panelW > 0) {
+        const lx = x + 2;
+        const rx = x + 14 - panelW;
+
+        ctx.fillStyle = "#3c8c8c";
+        ctx.fillRect(lx, yTop + 6, panelW, 26);
+        ctx.fillRect(rx, yTop + 6, panelW, 26);
+
+        ctx.fillStyle = "#68c8c4";
+        ctx.fillRect(lx, yTop + 7, Math.max(1, panelW - 1), 24);
+        ctx.fillRect(rx + 1, yTop + 7, Math.max(1, panelW - 1), 24);
+
+        // 扉の小窓・中央パッキン
+        if (panelW >= 4) {
+          ctx.fillStyle = "#162d38";
+          ctx.fillRect(lx + 1, yTop + 10, panelW - 2, 7);
+          ctx.fillRect(rx + 1, yTop + 10, panelW - 2, 7);
+          ctx.fillStyle = "#a8f0f0";
+          ctx.fillRect(lx + 1, yTop + 10, 1, 2);
+          ctx.fillRect(rx + 1, yTop + 10, 1, 2);
+        }
+        ctx.fillStyle = "#1c3c40";
+        ctx.fillRect(lx + panelW - 1, yTop + 6, 1, 26);
+        ctx.fillRect(rx, yTop + 6, 1, 26);
+      }
+    }
+
     drawBreakableWall(ctx, x, yTop, tile) {
       const hp = tile & 0x07;
       const group = tile & 0x70; // 0x40=1回壁, 0x10=2回壁, 0x20=3回壁
@@ -668,6 +760,8 @@
       } else if (isPillarCrumblingTile(val)) {
         const stage = val & 0x07;
         this.drawPillarCrumbling(ctx, x, yTop, stage, world.f);
+      } else if (val === TILE.DOOR || isDoorRelatedTile(val)) {
+        this.drawDoor(ctx, x, yTop, val, world.f);
       } else if (val === TILE.DRUM) {
         this.drawDrum(ctx, x, yTop);
       } else if (val === TILE.BOMB) {
