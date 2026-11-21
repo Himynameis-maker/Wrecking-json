@@ -602,7 +602,7 @@
           slot.prom = 0;
           slot.n = 0;
           slot.state = 11;
-          slot.stunTimer = slot.isMario ? 30 : 45;
+          slot.stunTimer = 19;
           this.updateCR(slot, world);
           return;
         }
@@ -614,7 +614,7 @@
           slot.prom = 0;
           slot.n = 0;
           slot.state = 11;
-          slot.stunTimer = slot.isMario ? 30 : 45;
+          slot.stunTimer = 19;
           this.updateCR(slot, world);
           return;
         }
