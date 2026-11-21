@@ -1256,7 +1256,6 @@
       const prevWaves = this.waves;
       this.waves = [];
       const nextWaves = [];
-      const triggeredCells = new Set();
 
       for (const w of prevWaves) {
         w.timer -= 1;
@@ -1264,13 +1263,10 @@
           nextWaves.push(w);
           continue;
         }
-        const key = w.row + "," + w.col;
-        if (triggeredCells.has(key)) continue;
 
         const t = this.getTile(w.row, w.col);
         if (!isBreakableTile(t)) continue;
 
-        triggeredCells.add(key);
         this.hitCell(w.row, w.col, true);
 
         if (t !== TILE.BOMB) {
@@ -1278,16 +1274,16 @@
           if (t === TILE.BREAK_LADDER || afterTile !== TILE.EMPTY) {
             this.explosions.push({ row: w.row, col: w.col, timer: 10, maxTimer: 10, age: 0, kind: "spark", byMario: true });
           }
-          if (w.stepsLeft > 1) {
-            nextWaves.push({
-              row: w.row,
-              col: this.wrapCol(w.col + w.dir),
-              dir: w.dir,
-              timer: 10,
-              stepsLeft: w.stepsLeft - 1,
-              byMario: true
-            });
-          }
+        }
+        if (w.stepsLeft > 1) {
+          nextWaves.push({
+            row: w.row,
+            col: this.wrapCol(w.col + w.dir),
+            dir: w.dir,
+            timer: 10,
+            stepsLeft: w.stepsLeft - 1,
+            byMario: true
+          });
         }
       }
       this.waves = nextWaves.concat(this.waves);
