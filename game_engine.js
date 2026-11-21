@@ -7,6 +7,11 @@
   const UP = 8;
   const HAMMER = 16;
 
+  // 通常壁・鉄柱の共通崩壊フレーム基準 ($B0F1 + $AB6F: stage 5->4->3->2->1->0)
+  const COLLAPSE_STAGE_FRAMES = 8;
+  const COLLAPSE_TOTAL_FRAMES = 1 + COLLAPSE_STAGE_FRAMES * 4; // 33F
+  const COLLAPSE_HIT_FRAMES = 1 + COLLAPSE_STAGE_FRAMES * 3;   // 25F (stage >= 2)
+
   const TILE = {
     EMPTY: 0x00,
     LADDER: 0x01,
@@ -271,7 +276,7 @@
               return true;
             }
           } else if (ex.kind === "wall") {
-            if (ex.byMario !== slot.isMario) {
+            if (ex.age < COLLAPSE_HIT_FRAMES && ex.byMario !== slot.isMario) {
               this.enterKnockdown(slot);
               return true;
             }
@@ -1050,8 +1055,8 @@
         row,
         col: c,
         stage: 4,
-        timer: 8,
-        spreadTimer: 8,
+        timer: COLLAPSE_STAGE_FRAMES,
+        spreadTimer: COLLAPSE_STAGE_FRAMES,
         spreadUp,
         spreadDown,
         hasBelowSame,
@@ -1083,7 +1088,7 @@
         e.timer -= 1;
         if (e.timer <= 0) {
           e.stage -= 1;
-          e.timer = 8;
+          e.timer = COLLAPSE_STAGE_FRAMES;
           if (e.stage <= 0) {
             this.crumblingLadders.delete(this.cellKey(e.row, e.col));
             this.setTile(e.row, e.col, e.hasBelowSame ? TILE.HOLE_CRUMBLED : TILE.EMPTY);
@@ -1154,7 +1159,7 @@
             this.setTile(e.row, e.col, TILE.EMPTY);
             this.breakEffects.push({ row: e.row, col: e.col, tile: TILE.PILLAR, timer: 14, maxTimer: 14 });
           } else {
-            e.timer = 8;
+            e.timer = COLLAPSE_STAGE_FRAMES;
             this.setTile(e.row, e.col, 0x70 + e.stage);
           }
         }
@@ -1211,7 +1216,15 @@
       } else {
         this.setTile(row, c, TILE.EMPTY);
         this.breakEffects.push({ row, col: c, tile, timer: 16, maxTimer: 16 });
-        this.explosions.push({ row, col: c, timer: 16, maxTimer: 16, age: 0, kind: "wall", byMario: !!byMario });
+        this.explosions.push({
+          row,
+          col: c,
+          timer: COLLAPSE_TOTAL_FRAMES,
+          maxTimer: COLLAPSE_TOTAL_FRAMES,
+          age: 0,
+          kind: "wall",
+          byMario: !!byMario
+        });
       }
       return true;
     }
