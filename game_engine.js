@@ -76,7 +76,7 @@
 
   function isSameLadderType(t1, t2) {
     return (t1 === TILE.LADDER && t2 === TILE.LADDER) ||
-      (t1 === TILE.BREAK_LADDER && t === TILE.BREAK_LADDER);
+      (t1 === TILE.BREAK_LADDER && t2 === TILE.BREAK_LADDER);
   }
 
   function isHoleTile(t) {
