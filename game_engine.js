@@ -225,7 +225,6 @@
         if (world.getTile(slot.row, sideCol) === TILE.DRUM_FALLING) {
           this.snapX(slot, world);
           this.updateCR(slot, world);
-          return true;
         }
       }
       return false;
@@ -253,16 +252,16 @@
         return false;
       }
 
-      if (world.explosions.length > 0) {
-        const isHoldingLadder = slot.state === 2 ||
-          slot.state === 6 ||
-          (slot.state === 3 && slot.kind !== "arrive" && slot.kind !== "arrive_top");
-        const checkRow = isHoldingLadder
-          ? Math.max(0, Math.min(world.rows - 1, Math.floor(slot.topY / 32)))
-          : (slot.state === 5
-            ? Math.max(0, Math.min(world.rows - 1, Math.floor((slot.y - 16) / 32)))
-            : slot.row);
+      const isHoldingLadder = slot.state === 2 ||
+        slot.state === 6 ||
+        (slot.state === 3 && slot.kind !== "arrive" && slot.kind !== "arrive_top");
+      const checkRow = isHoldingLadder
+        ? Math.max(0, Math.min(world.rows - 1, Math.floor(slot.topY / 32)))
+        : (slot.state === 5
+          ? Math.max(0, Math.min(world.rows - 1, Math.floor((slot.y - 16) / 32)))
+          : slot.row);
 
+      if (world.explosions.length > 0) {
         for (let i = 0; i < world.explosions.length; i++) {
           const ex = world.explosions[i];
           if (ex.col !== slot.col || ex.row !== checkRow) continue;
@@ -277,6 +276,14 @@
               return true;
             }
           }
+        }
+      }
+
+      if (world.pillarBreaks.size > 0 && !(slot.flag & 2)) {
+        const pInfo = world.getPillarBreakInfo(checkRow, slot.col);
+        if (pInfo && pInfo.stage >= 2 && pInfo.byMario !== slot.isMario) {
+          this.enterKnockdown(slot);
+          return true;
         }
       }
 
@@ -1092,7 +1099,7 @@
       }
     }
 
-    triggerPillar(row, col) {
+    triggerPillar(row, col, byMario) {
       if (row < 0 || row >= this.rows) return false;
       const c = this.wrapCol(col);
 
@@ -1102,7 +1109,8 @@
         row,
         col: c,
         stage: 5,
-        timer: 1
+        timer: 1,
+        byMario: !!byMario
       });
 
       if (row >= 1 && this.fallingPillars.length < 12) {
@@ -1194,7 +1202,7 @@
       }
 
       if (tile === TILE.PILLAR) {
-        return this.triggerPillar(row, c);
+        return this.triggerPillar(row, c, byMario);
       }
 
       const hp = tile & 0x07;
@@ -1203,6 +1211,7 @@
       } else {
         this.setTile(row, c, TILE.EMPTY);
         this.breakEffects.push({ row, col: c, tile, timer: 16, maxTimer: 16 });
+        this.explosions.push({ row, col: c, timer: 16, maxTimer: 16, age: 0, kind: "wall", byMario: !!byMario });
       }
       return true;
     }
@@ -1265,11 +1274,7 @@
         } else {
           this.hitCell(w.row, w.col, w.byMario);
           const afterTile = this.getTile(w.row, w.col);
-          if (t === TILE.BREAK_LADDER) {
-            this.explosions.push({ row: w.row, col: w.col, timer: 10, maxTimer: 10, age: 0, kind: "spark", byMario: !!w.byMario });
-          } else if (afterTile === TILE.EMPTY) {
-            this.explosions.push({ row: w.row, col: w.col, timer: 16, maxTimer: 16, age: 0, kind: "wall", byMario: !!w.byMario });
-          } else {
+          if (t === TILE.BREAK_LADDER || afterTile !== TILE.EMPTY) {
             this.explosions.push({ row: w.row, col: w.col, timer: 10, maxTimer: 10, age: 0, kind: "spark", byMario: !!w.byMario });
           }
           if (w.stepsLeft > 1) {
